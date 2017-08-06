@@ -150,6 +150,26 @@ Confirm that the subnet route table has entries for the lease acquired by each o
 </div>
 <div class="caption">AWS Routes</div>
 
+### Filtering route tables
+
+The backend can be configured to filter routes by setting a `RouteTableFilter` to a list of name=value pairs:
+
+```shell
+$ /usr/bin/etcdctl \
+    --cert-file=etcd.cert \
+    --key-file=etcd.key \
+    --ca-file=ca.cert \
+    --peers https://127.0.0.1:4001 set /coreos.com/network/config \
+      '{"Backend": {"Type": "aws-vpc, "RouteTableFilter": ["tag:TagName=TagValue"]}}'
+```
+
+The filter values follow the filter syntax described in [AWS describe route table].
+
 ### Limitations
 
 Keep in mind that the Amazon VPC [limits](http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_Appendix_Limits.html) the number of entries per route table to 50. If you require more routes, request a quota increase or simply switch to the VXLAN backend.
+
+
+[//]: # (Footnotes and references)
+
+[AWS describe route table]: http://docs.aws.amazon.com/cli/latest/reference/ec2/describe-route-tables.html#options

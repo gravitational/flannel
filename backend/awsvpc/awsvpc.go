@@ -60,7 +60,7 @@ func (conf *backendConfig) routeTablesByFilter(ec2c *ec2.EC2) ([]string, error) 
 	for _, v := range conf.RouteTableFilter {
 		chunks := strings.SplitN(v, "=", 2)
 		if len(chunks) != 2 {
-			return nil, fmt.Errorf("Error parsing filter: %v", v)
+			return nil, fmt.Errorf("invalid filter value %q, expected name=value pair", v)
 		}
 		filter.Add(chunks[0], chunks[1])
 	}
