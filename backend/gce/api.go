@@ -130,5 +130,5 @@ func (api *gceAPI) pollOperationStatus(operationName string) error {
 }
 
 func (api *gceAPI) formatRouteName(subnet string) string {
-	return fmt.Sprintf("kubernetes-%s-%s", api.gceInstance.Id, replacer.Replace(subnet))
+	return fmt.Sprintf("kubernetes-%v-%s", api.gceInstance.Id, replacer.Replace(subnet))
 }
