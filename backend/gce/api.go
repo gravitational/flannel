@@ -82,24 +82,25 @@ func newAPI() (*gceAPI, error) {
 }
 
 func (api *gceAPI) getRoute(subnet string) (*compute.Route, error) {
-	routeName := formatRouteName(subnet)
+	routeName := api.formatRouteName(subnet)
 	return api.computeService.Routes.Get(api.project, routeName).Do()
 }
 
 func (api *gceAPI) deleteRoute(subnet string) (*compute.Operation, error) {
-	routeName := formatRouteName(subnet)
+	routeName := api.formatRouteName(subnet)
 	return api.computeService.Routes.Delete(api.project, routeName).Do()
 }
 
 func (api *gceAPI) insertRoute(subnet string) (*compute.Operation, error) {
 	log.Infof("Inserting route for subnet: %v", subnet)
 	route := &compute.Route{
-		Name:            formatRouteName(subnet),
+		Name:            api.formatRouteName(subnet),
 		DestRange:       subnet,
 		Network:         api.gceNetwork.SelfLink,
 		NextHopInstance: api.gceInstance.SelfLink,
 		Priority:        1000,
 		Tags:            []string{},
+		Description:     "k8s-node-route",
 	}
 	return api.computeService.Routes.Insert(api.project, route).Do()
 }
@@ -128,6 +129,6 @@ func (api *gceAPI) pollOperationStatus(operationName string) error {
 	return fmt.Errorf("timeout waiting for operation to finish")
 }
 
-func formatRouteName(subnet string) string {
-	return fmt.Sprintf("flannel-%s", replacer.Replace(subnet))
+func (api *gceAPI) formatRouteName(subnet string) string {
+	return fmt.Sprintf("kubernetes-%s-%s", api.gceInstance.Id, replacer.Replace(subnet))
 }
