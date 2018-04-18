@@ -209,7 +209,9 @@ func main() {
 
 	// Start "Running" the backend network. This will block until the context is done so run in another goroutine.
 	go bn.Run(ctx)
-	go resetNodeCondition(ctx)
+	if config.BackendType == "gce" {
+		go resetNodeCondition(ctx)
+	}
 	log.Infof("Finished starting backend.")
 
 	daemon.SdNotify(false, "READY=1")
