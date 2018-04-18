@@ -16,6 +16,7 @@ package gce
 
 import (
 	"fmt"
+	"path"
 	"time"
 
 	log "github.com/golang/glog"
@@ -82,8 +83,30 @@ func newAPI() (*gceAPI, error) {
 }
 
 func (api *gceAPI) getRoute(subnet string) (*compute.Route, error) {
-	routeName := api.formatRouteName(subnet)
-	return api.computeService.Routes.Get(api.project, routeName).Do()
+	listCall := api.computeService.Routes.List(api.project)
+	filter := "(name eq kubernetes-.*) "
+	filter += "(description eq k8s-node-route)"
+	listCall = listCall.Filter(filter)
+
+	res, err := listCall.Do()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, r := range res.Items {
+		targetNodeName := path.Base(r.NextHopInstance)
+		if targetNodeName != api.gceInstance.Name {
+			log.Infof("Skipping non-matching route: %#v.", r)
+		} else {
+			log.Infof("Found matching route: %#v.", r)
+			return r
+		}
+	}
+
+	return nil, fmt.Errorf("could not find a route for %#v", api.gceInstance)
+
+	// routeName := api.formatRouteName(subnet)
+	// return api.computeService.Routes.Get(api.project, routeName).Do()
 }
 
 func (api *gceAPI) deleteRoute(subnet string) (*compute.Operation, error) {

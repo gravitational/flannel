@@ -38,6 +38,7 @@
 package gce
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -83,46 +84,60 @@ func (g *GCEBackend) ensureAPI() error {
 }
 
 func (g *GCEBackend) RegisterNetwork(ctx context.Context, config *subnet.Config) (backend.Network, error) {
-	attrs := subnet.LeaseAttrs{
-		PublicIP: ip.FromIP(g.extIface.ExtAddr),
-	}
-
-	l, err := g.sm.AcquireLease(ctx, &attrs)
-	switch err {
-	case nil:
-
-	case context.Canceled, context.DeadlineExceeded:
-		return nil, err
-
-	default:
-		return nil, fmt.Errorf("failed to acquire lease: %v", err)
-	}
-
-	if err = g.ensureAPI(); err != nil {
-		return nil, err
-	}
-
-	found, err := g.handleMatchingRoute(l.Subnet.String())
+	route, err := g.api.getRoute("")
 	if err != nil {
-		return nil, fmt.Errorf("error handling matching route: %v", err)
+		return nil, err
 	}
-
-	if !found {
-		operation, err := g.api.insertRoute(l.Subnet.String())
-		if err != nil {
-			return nil, fmt.Errorf("error inserting route: %v", err)
-		}
-
-		err = g.api.pollOperationStatus(operation.Name)
-		if err != nil {
-			return nil, fmt.Errorf("insert operaiton failed: %v", err)
-		}
+	var ip4Net ip.IP4Net
+	if err := json.Unmarshal(route.DestRange, &ip4Net); err != nil {
+		return nil, err
 	}
-
 	return &backend.SimpleNetwork{
-		SubnetLease: l,
-		ExtIface:    g.extIface,
+		SubnetLease: &subnet.Lease{
+			Subnet: ip4Net,
+			Attrs: subnet.LeaseAttrs{
+				PublicIP: ip.FromIP(g.extIface.ExtAddr),
+			},
+		},
+		ExtIface: g.extIface,
 	}, nil
+
+	// l, err := g.sm.AcquireLease(ctx, &attrs)
+	// switch err {
+	// case nil:
+
+	// case context.Canceled, context.DeadlineExceeded:
+	// 	return nil, err
+
+	// default:
+	// 	return nil, fmt.Errorf("failed to acquire lease: %v", err)
+	// }
+
+	// if err = g.ensureAPI(); err != nil {
+	// 	return nil, err
+	// }
+
+	// found, err := g.handleMatchingRoute(l.Subnet.String())
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error handling matching route: %v", err)
+	// }
+
+	// if !found {
+	// 	operation, err := g.api.insertRoute(l.Subnet.String())
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("error inserting route: %v", err)
+	// 	}
+
+	// 	err = g.api.pollOperationStatus(operation.Name)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("insert operaiton failed: %v", err)
+	// 	}
+	// }
+
+	// return &backend.SimpleNetwork{
+	// 	SubnetLease: l,
+	// 	ExtIface:    g.extIface,
+	// }, nil
 }
 
 //returns true if an exact matching rule is found
