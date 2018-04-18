@@ -92,11 +92,11 @@ func init() {
 	flag.StringVar(&opts.iface, "iface", "", "interface to use (IP or name) for inter-host communication")
 	flag.StringVar(&opts.subnetFile, "subnet-file", "/run/flannel/subnet.env", "filename where env variables (subnet, MTU, ... ) will be written to")
 	flag.StringVar(&opts.publicIP, "public-ip", "", "IP accessible by other nodes for inter-host communication")
-	flag.StringVar(&opts.kubeAPIServer, "kube-apiserver", "", "Kubernetes API server address")
-	flag.StringVar(&opts.kubeNode, "kube-node", "", "Kubernetes node name")
-	flag.StringVar(&opts.kubeCert, "kube-cert", "", "Kubernetes certificate file")
-	flag.StringVar(&opts.kubeKey, "kube-key", "", "Kubernetes private key file")
-	flag.StringVar(&opts.kubeCA, "kube-ca", "", "Kubernetes CA file")
+	flag.StringVar(&opts.kubeAPIServer, "kube-apiserver", "", "Kubernetes API server address in host:port format")
+	flag.StringVar(&opts.kubeNode, "kube-node", "", "Kubernetes node name flannel is running on")
+	flag.StringVar(&opts.kubeCert, "kube-cert", "", "Kubernetes API server certificate file used for client auth")
+	flag.StringVar(&opts.kubeKey, "kube-key", "", "Kubernetes API server private key file used for client auth")
+	flag.StringVar(&opts.kubeCA, "kube-ca", "", "Kubernetes API server CA file used for client auth")
 	flag.IntVar(&opts.subnetLeaseRenewMargin, "subnet-lease-renew-margin", 60, "Subnet lease renewal margin, in minutes.")
 	flag.BoolVar(&opts.ipMasq, "ip-masq", false, "setup IP masquerade rule for traffic destined outside of overlay network")
 	flag.BoolVar(&opts.kubeSubnetMgr, "kube-subnet-mgr", false, "Contact the Kubernetes API for subnet assignement instead of etcd.")
@@ -209,9 +209,14 @@ func main() {
 
 	// Start "Running" the backend network. This will block until the context is done so run in another goroutine.
 	go bn.Run(ctx)
+
+	// When running on GCE with cloud integration, the node comes up explicitly
+	// marked with NodeUnavailable status which flannel needs to reset after
+	// successfully provisioning a route on GCE
 	if config.BackendType == "gce" {
 		go resetNodeCondition(ctx)
 	}
+
 	log.Infof("Finished starting backend.")
 
 	daemon.SdNotify(false, "READY=1")
