@@ -68,6 +68,11 @@ type CmdLineOpts struct {
 	subnetDir              string
 	publicIP               string
 	subnetLeaseRenewMargin int
+	kubeAPIServer          string
+	kubeNode               string
+	kubeCert               string
+	kubeKey                string
+	kubeCA                 string
 }
 
 var (
@@ -87,6 +92,11 @@ func init() {
 	flag.StringVar(&opts.iface, "iface", "", "interface to use (IP or name) for inter-host communication")
 	flag.StringVar(&opts.subnetFile, "subnet-file", "/run/flannel/subnet.env", "filename where env variables (subnet, MTU, ... ) will be written to")
 	flag.StringVar(&opts.publicIP, "public-ip", "", "IP accessible by other nodes for inter-host communication")
+	flag.StringVar(&opts.kubeAPIServer, "kube-apiserver", "", "Kubernetes API server address")
+	flag.StringVar(&opts.kubeNode, "kube-node", "", "Kubernetes node name")
+	flag.StringVar(&opts.kubeCert, "kube-cert", "", "Kubernetes certificate file")
+	flag.StringVar(&opts.kubeKey, "kube-key", "", "Kubernetes private key file")
+	flag.StringVar(&opts.kubeCA, "kube-ca", "", "Kubernetes CA file")
 	flag.IntVar(&opts.subnetLeaseRenewMargin, "subnet-lease-renew-margin", 60, "Subnet lease renewal margin, in minutes.")
 	flag.BoolVar(&opts.ipMasq, "ip-masq", false, "setup IP masquerade rule for traffic destined outside of overlay network")
 	flag.BoolVar(&opts.kubeSubnetMgr, "kube-subnet-mgr", false, "Contact the Kubernetes API for subnet assignement instead of etcd.")
@@ -199,6 +209,7 @@ func main() {
 
 	// Start "Running" the backend network. This will block until the context is done so run in another goroutine.
 	go bn.Run(ctx)
+	go resetNodeCondition(ctx)
 	log.Infof("Finished starting backend.")
 
 	daemon.SdNotify(false, "READY=1")
