@@ -68,6 +68,7 @@ type CmdLineOpts struct {
 	subnetDir              string
 	publicIP               string
 	subnetLeaseRenewMargin int
+	noSubnetWatch          bool
 }
 
 var (
@@ -92,6 +93,7 @@ func init() {
 	flag.BoolVar(&opts.kubeSubnetMgr, "kube-subnet-mgr", false, "Contact the Kubernetes API for subnet assignement instead of etcd.")
 	flag.BoolVar(&opts.help, "help", false, "print this message")
 	flag.BoolVar(&opts.version, "version", false, "print version and exit")
+	flag.BoolVar(&opts.noSubnetWatch, "no-subnet-watch", false, "Disable subnet watch")
 }
 
 func newSubnetManager() (subnet.Manager, error) {
@@ -204,7 +206,7 @@ func main() {
 	daemon.SdNotify(false, "READY=1")
 
 	// Kube subnet mgr doesn't lease the subnet for this node - it just uses the podCidr that's already assigned.
-	if opts.kubeSubnetMgr {
+	if opts.kubeSubnetMgr || opts.noSubnetWatch {
 		// Wait for the shutdown to be signalled
 		<-ctx.Done()
 	} else {

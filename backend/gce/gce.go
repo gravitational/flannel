@@ -38,8 +38,8 @@
 package gce
 
 import (
-	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 
@@ -84,17 +84,20 @@ func (g *GCEBackend) ensureAPI() error {
 }
 
 func (g *GCEBackend) RegisterNetwork(ctx context.Context, config *subnet.Config) (backend.Network, error) {
+	if err := g.ensureAPI(); err != nil {
+		return nil, err
+	}
 	route, err := g.api.getRoute("")
 	if err != nil {
 		return nil, err
 	}
-	var ip4Net ip.IP4Net
-	if err := json.Unmarshal(route.DestRange, &ip4Net); err != nil {
+	_, ipNet, err := net.ParseCIDR(route.DestRange)
+	if err != nil {
 		return nil, err
 	}
 	return &backend.SimpleNetwork{
 		SubnetLease: &subnet.Lease{
-			Subnet: ip4Net,
+			Subnet: ip.FromIPNet(ipNet),
 			Attrs: subnet.LeaseAttrs{
 				PublicIP: ip.FromIP(g.extIface.ExtAddr),
 			},

@@ -99,7 +99,7 @@ func (api *gceAPI) getRoute(subnet string) (*compute.Route, error) {
 			log.Infof("Skipping non-matching route: %#v.", r)
 		} else {
 			log.Infof("Found matching route: %#v.", r)
-			return r
+			return r, nil
 		}
 	}
 
