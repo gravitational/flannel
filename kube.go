@@ -22,9 +22,8 @@ import (
 // and Kubernetes expects this condition to be removed either by RouteController
 // or networking plugins.
 //
-// We use neither of those: flannel does all route management (including
-// creating routes using cloud APIs using proper backend) and thus it has
-// to reset this condition itself.
+// Since flannel is managing routes (including creating routes using cloud APIs
+// using proper backend) and thus it has to reset this condition itself.
 //
 // According to the current Kubernetes source code and multiple Github issues
 // this is an "expected" way to workaround this and what other people are
