@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-
-	"net"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
