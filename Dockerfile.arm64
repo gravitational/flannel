@@ -1,14 +1,14 @@
-FROM aarch64/busybox:glibc
+FROM arm64v8/alpine
 
-MAINTAINER Tom Denham <tom@tigera.io>
+LABEL maintainer="Tom Denham <tom@tigera.io>"
 
 ENV FLANNEL_ARCH=arm64
 
+ADD dist/qemu-aarch64-static /usr/bin/qemu-aarch64-static
+RUN apk add --no-cache iproute2 net-tools ca-certificates iptables strongswan && update-ca-certificates
+RUN apk add wireguard-tools --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing
 COPY dist/flanneld-$FLANNEL_ARCH /opt/bin/flanneld
-COPY dist/iptables-$FLANNEL_ARCH /usr/local/bin/iptables
 COPY dist/mk-docker-opts.sh /opt/bin/
-COPY dist/libpthread.so.0-$FLANNEL_ARCH /lib/libpthread.so.0
-COPY dist/ld64.so.1-$FLANNEL_ARCH /lib/ld64.so.1
-COPY dist/libc.so.6-$FLANNEL_ARCH /lib/libc.so.6
 
 ENTRYPOINT ["/opt/bin/flanneld"]
+

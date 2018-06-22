@@ -16,6 +16,7 @@ package backend
 
 import (
 	"net"
+	"sync"
 
 	"golang.org/x/net/context"
 
@@ -34,7 +35,7 @@ type ExternalInterface struct {
 // needed.
 type Backend interface {
 	// Called when the backend should create or begin managing a new network
-	RegisterNetwork(ctx context.Context, config *subnet.Config) (Network, error)
+	RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (Network, error)
 }
 
 type Network interface {
@@ -44,20 +45,3 @@ type Network interface {
 }
 
 type BackendCtor func(sm subnet.Manager, ei *ExternalInterface) (Backend, error)
-
-type SimpleNetwork struct {
-	SubnetLease *subnet.Lease
-	ExtIface    *ExternalInterface
-}
-
-func (n *SimpleNetwork) Lease() *subnet.Lease {
-	return n.SubnetLease
-}
-
-func (n *SimpleNetwork) MTU() int {
-	return n.ExtIface.Iface.MTU
-}
-
-func (_ *SimpleNetwork) Run(ctx context.Context) {
-	<-ctx.Done()
-}

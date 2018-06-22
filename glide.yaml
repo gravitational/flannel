@@ -9,7 +9,7 @@ import:
   - aws/session
   - service/ec2
 - package: github.com/coreos/etcd
-  version: ^3.1.0
+  version: 3.1.x
   subpackages:
   - client
   - clientv3
@@ -52,9 +52,13 @@ import:
   - rest
   - tools/cache
 - package: k8s.io/apimachinery
-  version: 72e51762028fdf72f1a20e59bedceece02a425c6
   subpackages:
   - pkg/apis/meta/v1
   - pkg/runtime
   - pkg/util/wait
   - pkg/watch
+- package: github.com/joho/godotenv
+  version: v1.1
+- package: github.com/bronze1man/goStrongswanVici
+  version: 4d72634a2f113aa48347dbc7dcb14adb806b6534
+

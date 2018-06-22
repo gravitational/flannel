@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	etcd "github.com/coreos/etcd/client"
 	"github.com/coreos/flannel/pkg/ip"
 	. "github.com/coreos/flannel/subnet"
 	"github.com/jonboulle/clockwork"
@@ -75,6 +74,30 @@ func TestAcquireLease(t *testing.T) {
 
 	if !l.Subnet.Equal(l2.Subnet) {
 		t.Fatalf("AcquireLease did not reuse subnet; expected %v, got %v", l.Subnet, l2.Subnet)
+	}
+
+	// Test if a previous subnet will be used
+	msr2 := newDummyRegistry()
+	prevSubnet := ip.IP4Net{ip.MustParseIP4("10.3.6.0"), 24}
+	sm2 := NewMockManagerWithSubnet(msr2, prevSubnet)
+	prev, err := sm2.AcquireLease(context.Background(), &attrs)
+	if err != nil {
+		t.Fatal("AcquireLease failed: ", err)
+	}
+	if !prev.Subnet.Equal(prevSubnet) {
+		t.Fatalf("AcquireLease did not reuse subnet from previous run; expected %v, got %v", prevSubnet, prev.Subnet)
+	}
+
+	// Test that a previous subnet will not be used if it does not match the registry config
+	msr3 := newDummyRegistry()
+	invalidSubnet := ip.IP4Net{ip.MustParseIP4("10.4.1.0"), 24}
+	sm3 := NewMockManagerWithSubnet(msr3, invalidSubnet)
+	l3, err := sm3.AcquireLease(context.Background(), &attrs)
+	if err != nil {
+		t.Fatal("AcquireLease failed: ", err)
+	}
+	if l3.Subnet.Equal(invalidSubnet) {
+		t.Fatalf("AcquireLease reused invalid subnet from previous run; reused %v", l3.Subnet)
 	}
 }
 
@@ -299,142 +322,6 @@ func TestRenewLease(t *testing.T) {
 	t.Fatal("Failed to find acquired lease")
 }
 
-func TestLeaseRevoked(t *testing.T) {
-	msr := newDummyRegistry()
-	sm := NewMockManager(msr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	l := acquireLease(ctx, t, sm)
-
-	if err := sm.RevokeLease(ctx, l.Subnet); err != nil {
-		t.Fatalf("RevokeLease failed: %v", err)
-	}
-
-	_, _, err := msr.getSubnet(ctx, l.Subnet)
-	if err == nil {
-		t.Fatalf("Revoked lease still exists")
-	}
-	if etcdErr, ok := err.(etcd.Error); ok && etcdErr.Code != etcd.ErrorCodeKeyNotFound {
-		t.Fatalf("getSubnets after revoked lease returned unexpected error: %v", err)
-	}
-}
-
-func TestAddReservation(t *testing.T) {
-	msr := newDummyRegistry()
-	sm := NewMockManager(msr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	r := Reservation{
-		Subnet:   newIP4Net("10.4.3.0", 24),
-		PublicIP: ip.MustParseIP4("52.195.12.13"),
-	}
-	if err := sm.AddReservation(ctx, &r); err == nil {
-		t.Fatalf("unexpectedly added a reservation outside of configured network")
-	}
-
-	r.Subnet = newIP4Net("10.3.10.0", 24)
-	if err := sm.AddReservation(ctx, &r); err != nil {
-		t.Fatalf("failed to add reservation: %v", err)
-	}
-
-	// Add the same reservation -- should succeed
-	if err := sm.AddReservation(ctx, &r); err != nil {
-		t.Fatalf("failed to add reservation: %v", err)
-	}
-
-	// Add a reservation with a different public IP -- should fail
-	r2 := r
-	r2.PublicIP = ip.MustParseIP4("52.195.12.17")
-	if err := sm.AddReservation(ctx, &r2); err != ErrLeaseTaken {
-		t.Fatalf("taken add reservation returned: %v", err)
-	}
-
-	attrs := &LeaseAttrs{
-		PublicIP: r.PublicIP,
-	}
-	l, err := sm.AcquireLease(ctx, attrs)
-	if err != nil {
-		t.Fatalf("failed to acquire subnet: %v", err)
-	}
-	if !l.Subnet.Equal(r.Subnet) {
-		t.Fatalf("acquired subnet is not the reserved one: expected %v, got %v", r.Subnet, l.Subnet)
-	}
-	if !l.Expiration.IsZero() {
-		t.Fatalf("acquired lease (prev reserved) has expiration set")
-	}
-}
-
-func TestRemoveReservation(t *testing.T) {
-	msr := newDummyRegistry()
-	sm := NewMockManager(msr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	r := Reservation{
-		Subnet:   newIP4Net("10.3.10.0", 24),
-		PublicIP: ip.MustParseIP4("52.195.12.13"),
-	}
-	if err := sm.AddReservation(ctx, &r); err != nil {
-		t.Fatalf("failed to add reservation: %v", err)
-	}
-
-	if err := sm.RemoveReservation(ctx, r.Subnet); err != nil {
-		t.Fatalf("failed to remove reservation: %v", err)
-	}
-
-	// The node should have a TTL
-	sub, _, err := msr.getSubnet(ctx, r.Subnet)
-	if err != nil {
-		t.Fatalf("getSubnet failed: %v", err)
-	}
-
-	if sub.Expiration.IsZero() {
-		t.Fatalf("removed reservation resulted in no TTL")
-	}
-}
-
-func TestListReservations(t *testing.T) {
-	msr := newDummyRegistry()
-	sm := NewMockManager(msr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	r1 := Reservation{
-		Subnet:   newIP4Net("10.3.10.0", 24),
-		PublicIP: ip.MustParseIP4("52.195.12.13"),
-	}
-	if err := sm.AddReservation(ctx, &r1); err != nil {
-		t.Fatalf("failed to add reservation: %v", err)
-	}
-
-	r2 := Reservation{
-		Subnet:   newIP4Net("10.3.20.0", 24),
-		PublicIP: ip.MustParseIP4("52.195.12.14"),
-	}
-	if err := sm.AddReservation(ctx, &r2); err != nil {
-		t.Fatalf("failed to add reservation: %v", err)
-	}
-
-	rs, err := sm.ListReservations(ctx)
-	if err != nil {
-		if len(rs) != 2 {
-			t.Fatalf("unexpected number of reservations, expected 2, got %v", len(rs))
-		}
-		if !resvEqual(rs[0], r1) && !resvEqual(rs[1], r1) {
-			t.Fatalf("reservation not found")
-		}
-		if !resvEqual(rs[0], r2) && !resvEqual(rs[1], r2) {
-			t.Fatalf("reservation not found")
-		}
-	}
-}
-
 func inAllocatableRange(ctx context.Context, sm Manager, ipn ip.IP4Net) bool {
 	cfg, err := sm.GetNetworkConfig(ctx)
 	if err != nil {
@@ -442,8 +329,4 @@ func inAllocatableRange(ctx context.Context, sm Manager, ipn ip.IP4Net) bool {
 	}
 
 	return ipn.IP >= cfg.SubnetMin || ipn.IP <= cfg.SubnetMax
-}
-
-func resvEqual(r1, r2 Reservation) bool {
-	return r1.Subnet.Equal(r2.Subnet) && r1.PublicIP == r2.PublicIP
 }

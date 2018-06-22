@@ -1,3 +1,5 @@
+// +build !windows
+
 // Copyright 2015 flannel authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,15 +13,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build !windows
 
 package hostgw
 
 import (
 	"fmt"
 
+	"sync"
+
 	"github.com/coreos/flannel/backend"
 	"github.com/coreos/flannel/pkg/ip"
 	"github.com/coreos/flannel/subnet"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/net/context"
 )
 
@@ -27,14 +33,9 @@ func init() {
 	backend.Register("host-gw", New)
 }
 
-const (
-	routeCheckRetries = 10
-)
-
 type HostgwBackend struct {
 	sm       subnet.Manager
 	extIface *backend.ExternalInterface
-	networks map[string]*network
 }
 
 func New(sm subnet.Manager, extIface *backend.ExternalInterface) (backend.Backend, error) {
@@ -45,16 +46,26 @@ func New(sm subnet.Manager, extIface *backend.ExternalInterface) (backend.Backen
 	be := &HostgwBackend{
 		sm:       sm,
 		extIface: extIface,
-		networks: make(map[string]*network),
 	}
-
 	return be, nil
 }
 
-func (be *HostgwBackend) RegisterNetwork(ctx context.Context, config *subnet.Config) (backend.Network, error) {
-	n := &network{
-		extIface: be.extIface,
-		sm:       be.sm,
+func (be *HostgwBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
+	n := &backend.RouteNetwork{
+		SimpleNetwork: backend.SimpleNetwork{
+			ExtIface: be.extIface,
+		},
+		SM:          be.sm,
+		BackendType: "host-gw",
+		Mtu:         be.extIface.Iface.MTU,
+		LinkIndex:   be.extIface.Iface.Index,
+	}
+	n.GetRoute = func(lease *subnet.Lease) *netlink.Route {
+		return &netlink.Route{
+			Dst:       lease.Subnet.ToIPNet(),
+			Gw:        lease.Attrs.PublicIP.ToIP(),
+			LinkIndex: n.LinkIndex,
+		}
 	}
 
 	attrs := subnet.LeaseAttrs{
@@ -65,7 +76,7 @@ func (be *HostgwBackend) RegisterNetwork(ctx context.Context, config *subnet.Con
 	l, err := be.sm.AcquireLease(ctx, &attrs)
 	switch err {
 	case nil:
-		n.lease = l
+		n.SubnetLease = l
 
 	case context.Canceled, context.DeadlineExceeded:
 		return nil, err
@@ -73,8 +84,6 @@ func (be *HostgwBackend) RegisterNetwork(ctx context.Context, config *subnet.Con
 	default:
 		return nil, fmt.Errorf("failed to acquire lease: %v", err)
 	}
-
-	/* NB: docker will create the local route to `sn` */
 
 	return n, nil
 }

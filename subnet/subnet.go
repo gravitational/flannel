@@ -51,11 +51,6 @@ func (l *Lease) Key() string {
 	return MakeSubnetKey(l.Subnet)
 }
 
-type Reservation struct {
-	Subnet   ip.IP4Net
-	PublicIP ip.IP4
-}
-
 type (
 	EventType int
 
@@ -127,11 +122,8 @@ type Manager interface {
 	GetNetworkConfig(ctx context.Context) (*Config, error)
 	AcquireLease(ctx context.Context, attrs *LeaseAttrs) (*Lease, error)
 	RenewLease(ctx context.Context, lease *Lease) error
-	RevokeLease(ctx context.Context, sn ip.IP4Net) error
 	WatchLease(ctx context.Context, sn ip.IP4Net, cursor interface{}) (LeaseWatchResult, error)
 	WatchLeases(ctx context.Context, cursor interface{}) (LeaseWatchResult, error)
 
-	AddReservation(ctx context.Context, r *Reservation) error
-	RemoveReservation(ctx context.Context, subnet ip.IP4Net) error
-	ListReservations(ctx context.Context) ([]Reservation, error)
+	Name() string
 }

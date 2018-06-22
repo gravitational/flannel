@@ -23,7 +23,7 @@ flanneld -subnet-file /vxlan.env -etcd-prefix=/vxlan/network
 
 1. Download a `flannel` binary.
 ```bash
-wget https://github.com/coreos/flannel/releases/download/v0.7.0/flanneld-amd64 && chmod +x flanneld-amd64
+wget https://github.com/coreos/flannel/releases/download/v0.8.0/flanneld-amd64 && chmod +x flanneld-amd64
 ```
 2. Run the binary.
 ```bash
@@ -45,6 +45,23 @@ FLANNEL_NETWORK=10.5.0.0/16
 FLANNEL_SUBNET=10.5.72.1/24
 FLANNEL_MTU=1450
 FLANNEL_IPMASQ=false
+```
+Each time flannel is restarted, it will attempt to access the `FLANNEL_SUBNET` value written in this subnet config file. This prevents each host from needing to update its network information in case a host is unable to renew its lease before it expires (e.g. a host was restarting during the time flannel would normally renew its lease).
+
+The `FLANNEL_SUBNET` value is also only used if it is valid for the etcd network config. For instance, a `FLANNEL_SUBNET` value of `10.5.72.1/24` will not be used if the etcd network value is set to `10.6.0.0/16` since it is not within that network range.
+
+Subnet config value is `10.5.72.1/24`
+```bash
+cat /var/run/flannel/subnet.env
+FLANNEL_NETWORK=10.5.0.0/16
+FLANNEL_SUBNET=10.5.72.1/24
+FLANNEL_MTU=1450
+FLANNEL_IPMASQ=false
+```
+etcd network value is `10.6.0.0/16`. Since `10.5.72.1/24` is outside of this network, a new lease will be allocated.
+```bash
+etcdctl get /coreos.com/network/config
+{ "Network": "10.6.0.0/16", "Backend": {"Type": "vxlan"}}
 ```
 
 ## Interface selection

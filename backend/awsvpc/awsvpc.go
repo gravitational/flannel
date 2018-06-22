@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build !windows
 
 package awsvpc
 
@@ -19,6 +20,9 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"net"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -104,7 +108,7 @@ func (conf *backendConfig) routeTableConfigured() bool {
 	return configured
 }
 
-func (be *AwsVpcBackend) RegisterNetwork(ctx context.Context, config *subnet.Config) (backend.Network, error) {
+func (be *AwsVpcBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
 	// Parse our configuration
 	var cfg backendConfig
 

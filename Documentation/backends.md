@@ -22,6 +22,7 @@ Type and options:
 * `VNI` (number): VXLAN Identifier (VNI) to be used. Defaults to 1.
 * `Port` (number): UDP port to use for sending encapsulated packets. Defaults to kernel default, currently 8472.
 * `GBP` (Boolean): Enable [VXLAN Group Based Policy](https://github.com/torvalds/linux/commit/3511494ce2f3d3b77544c79b87511a4ddb61dc89).  Defaults to `false`.
+* `DirectRouting` (Boolean): Enable direct routes (like `host-gw`) when the hosts are on the same subnet. VXLAN will only be used to encapsulate packets to hosts on different subnets. Defaults to `false`.
 
 ### host-gw
 
@@ -98,9 +99,48 @@ Command to create a compute instance with the correct permissions and IP forward
   $ gcloud compute instances create INSTANCE --can-ip-forward --scopes compute-rw
 ```
 
-Route Limits: GCE [limits](https://cloud.google.com/compute/docs/resource-quotas) the number of routes for every *project* to 100.
+Route Limits: GCE [limits](https://cloud.google.com/compute/docs/resource-quotas) the number of routes for every *project* to 100 by default.
 
 
 [alicloud-vpc]: https://github.com/coreos/flannel/blob/master/Documentation/alicloud-vpc-backend.md
 [amazon-vpc]: https://github.com/coreos/flannel/blob/master/Documentation/aws-vpc-backend.md
 [gce-backend]: https://github.com/coreos/flannel/blob/master/Documentation/gce-backend.md
+
+
+### IPIP
+
+Use in-kernel IPIP to encapsulate the packets.
+
+IPIP kind of tunnels is the simplest one. It has the lowest overhead, but can incapsulate only IPv4 unicast traffic, so you will not be able to setup OSPF, RIP or any other multicast-based protocol.
+
+Type:
+* `Type` (string): `ipip`
+* `DirectRouting` (Boolean): Enable direct routes (like `host-gw`) when the hosts are on the same subnet. IPIP will only be used to encapsulate packets to hosts on different subnets. Defaults to `false`.
+
+Note that there may exist two ipip tunnel device `tunl0` and `flannel.ipip`, this is expected and it's not a bug.
+`tunl0` is automatically created per network namespace by ipip kernel module on modprobe ipip module. It is the namespace default IPIP device with attributes local=any and remote=any.
+When receiving IPIP protocol packets, kernel will forward them to tunl0 as a fallback device if it can't find an option whose local/remote attribute matches their src/dst ip address more precisely.
+`flannel.ipip` is created by flannel to achieve one to many ipip network.
+
+### IPSec
+
+Use in-kernel IPSec to encapsulate and encrypt the packets.
+
+[Strongswan](https://www.strongswan.org) is used at the IKEv2 daemon. A single pre-shared key is used for the initial key exchange between hosts and then Strongswan ensures that keys are rotated at regular intervals. 
+
+Type:
+* `Type` (string): `ipsec`
+* `PSK` (Boolean): Required. The pre shared key to use. It needs to be at least 96 characters long. One method for generating this key is to run `dd if=/dev/urandom count=48 bs=1 status=none | xxd -p -c 48`
+* `UDPEncap` (string): Optional, defaults to false. Forces the use UDP encapsulation of packets which can help with some NAT gateways.
+* `ESPProposal` (string): Optional, defaults to `aes128gcm16-sha256-prfsha256-ecp256`. Change this string to choose another ESP Proposal.
+
+#### Troubleshooting
+Logging
+* When flannel is run from a container, the Strongswan tools are installed. `swanctl` can be used for interacting with the charon and it provides a logs command.. 
+* Charon logs are also written to the stdout of the flannel process. 
+
+Troubleshooting
+* `ip xfrm state` can be used to interact with the kernel's security association database. This can be used to show the current security associations (SA) and whether a host is successfully establishing ipsec connections to other hosts.
+* `ip xfrm policy` can be used to show the installed policies. Flannel installs three policies for each host it connects to. 
+
+Flannel will not restore policies that are manually deleted (unless flannel is restarted). It will also not delete stale policies on startup. They can be removed by rebooting your host or by removing all ipsec state with `ip xfrm state flush && ip xfrm policy flush` and restarting flannel.
