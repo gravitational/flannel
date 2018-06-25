@@ -33,7 +33,8 @@ const (
 )
 
 type LocalManager struct {
-	registry Registry
+	registry       Registry
+	previousSubnet ip.IP4Net
 }
 
 type watchCursor struct {
@@ -68,17 +69,18 @@ func (c watchCursor) String() string {
 	return strconv.FormatUint(c.index, 10)
 }
 
-func NewLocalManager(config *EtcdConfig) (Manager, error) {
+func NewLocalManager(config *EtcdConfig, prevSubnet ip.IP4Net) (Manager, error) {
 	r, err := newEtcdSubnetRegistry(config, nil)
 	if err != nil {
 		return nil, err
 	}
-	return newLocalManager(r), nil
+	return newLocalManager(r, prevSubnet), nil
 }
 
-func newLocalManager(r Registry) Manager {
+func newLocalManager(r Registry, prevSubnet ip.IP4Net) Manager {
 	return &LocalManager{
-		registry: r,
+		registry:       r,
+		previousSubnet: prevSubnet,
 	}
 }
 
@@ -122,15 +124,25 @@ func findLeaseByIP(leases []Lease, pubIP ip.IP4) *Lease {
 	return nil
 }
 
+func findLeaseBySubnet(leases []Lease, subnet ip.IP4Net) *Lease {
+	for _, l := range leases {
+		if subnet.Equal(l.Subnet) {
+			return &l
+		}
+	}
+
+	return nil
+}
+
 func (m *LocalManager) tryAcquireLease(ctx context.Context, config *Config, extIaddr ip.IP4, attrs *LeaseAttrs) (*Lease, error) {
 	leases, _, err := m.registry.getSubnets(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// try to reuse a subnet if there's one that matches our IP
+	// Try to reuse a subnet if there's one that matches our IP
 	if l := findLeaseByIP(leases, extIaddr); l != nil {
-		// make sure the existing subnet is still within the configured network
+		// Make sure the existing subnet is still within the configured network
 		if isSubnetConfigCompat(config, l.Subnet) {
 			log.Infof("Found lease (%v) for current IP (%v), reusing", l.Subnet, extIaddr)
 
@@ -155,10 +167,51 @@ func (m *LocalManager) tryAcquireLease(ctx context.Context, config *Config, extI
 		}
 	}
 
-	// no existing match, grab a new one
-	sn, err := m.allocateSubnet(config, leases)
-	if err != nil {
-		return nil, err
+	// no existing match, check if there was a previous subnet to use
+	var sn ip.IP4Net
+	if !m.previousSubnet.Empty() {
+		// use previous subnet
+		if l := findLeaseBySubnet(leases, m.previousSubnet); l != nil {
+			// Make sure the existing subnet is still within the configured network
+			if isSubnetConfigCompat(config, l.Subnet) {
+				log.Infof("Found lease (%v) matching previously leased subnet, reusing", l.Subnet)
+
+				ttl := time.Duration(0)
+				if !l.Expiration.IsZero() {
+					// Not a reservation
+					ttl = subnetTTL
+				}
+				exp, err := m.registry.updateSubnet(ctx, l.Subnet, attrs, ttl, 0)
+				if err != nil {
+					return nil, err
+				}
+
+				l.Attrs = *attrs
+				l.Expiration = exp
+				return l, nil
+			} else {
+				log.Infof("Found lease (%v) matching previously leased subnet but not compatible with current config, deleting", l.Subnet)
+				if err := m.registry.deleteSubnet(ctx, l.Subnet); err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			// Check if the previous subnet is a part of the network and of the right subnet length
+			if isSubnetConfigCompat(config, m.previousSubnet) {
+				log.Infof("Found previously leased subnet (%v), reusing", m.previousSubnet)
+				sn = m.previousSubnet
+			} else {
+				log.Errorf("Found previously leased subnet (%v) that is not compatible with the Etcd network config, ignoring", m.previousSubnet)
+			}
+		}
+	}
+
+	if sn.Empty() {
+		// no existing match, grab a new one
+		sn, err = m.allocateSubnet(config, leases)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	exp, err := m.registry.createSubnet(ctx, sn, attrs, subnetTTL)
@@ -199,10 +252,6 @@ OuterLoop:
 		i := randInt(0, len(bag))
 		return ip.IP4Net{IP: bag[i], PrefixLen: config.SubnetLen}, nil
 	}
-}
-
-func (m *LocalManager) RevokeLease(ctx context.Context, sn ip.IP4Net) error {
-	return m.registry.deleteSubnet(ctx, sn)
 }
 
 func (m *LocalManager) RenewLease(ctx context.Context, lease *Lease) error {
@@ -328,126 +377,10 @@ func isSubnetConfigCompat(config *Config, sn ip.IP4Net) bool {
 	return sn.PrefixLen == config.SubnetLen
 }
 
-func (m *LocalManager) tryAddReservation(ctx context.Context, r *Reservation) error {
-	attrs := &LeaseAttrs{
-		PublicIP: r.PublicIP,
+func (m *LocalManager) Name() string {
+	previousSubnet := m.previousSubnet.String()
+	if m.previousSubnet.Empty() {
+		previousSubnet = "None"
 	}
-
-	_, err := m.registry.createSubnet(ctx, r.Subnet, attrs, 0)
-	switch {
-	case err == nil:
-		return nil
-
-	case !isErrEtcdNodeExist(err):
-		return err
-	}
-
-	// This subnet or its reservation already exists.
-	// Get what's there and
-	// - if PublicIP matches, remove the TTL make it a reservation
-	// - otherwise, error out
-	sub, asof, err := m.registry.getSubnet(ctx, r.Subnet)
-	switch {
-	case err == nil:
-	case isErrEtcdKeyNotFound(err):
-		// Subnet just got expired or was deleted
-		return errTryAgain
-	default:
-		return err
-	}
-
-	if sub.Attrs.PublicIP != r.PublicIP {
-		// Subnet already taken
-		return ErrLeaseTaken
-	}
-
-	// remove TTL
-	_, err = m.registry.updateSubnet(ctx, r.Subnet, &sub.Attrs, 0, asof)
-	if isErrEtcdTestFailed(err) {
-		return errTryAgain
-	}
-	return err
-}
-
-func (m *LocalManager) AddReservation(ctx context.Context, r *Reservation) error {
-	config, err := m.GetNetworkConfig(ctx)
-	if err != nil {
-		return err
-	}
-
-	if config.SubnetLen != r.Subnet.PrefixLen {
-		return fmt.Errorf("reservation subnet has mask incompatible with network config")
-	}
-
-	if !config.Network.Overlaps(r.Subnet) {
-		return fmt.Errorf("reservation subnet is outside of flannel network")
-	}
-
-	for i := 0; i < raceRetries; i++ {
-		err := m.tryAddReservation(ctx, r)
-		switch {
-		case err == nil:
-			return nil
-		case err == errTryAgain:
-			continue
-		default:
-			return err
-		}
-	}
-
-	return ErrNoMoreTries
-}
-
-func (m *LocalManager) tryRemoveReservation(ctx context.Context, subnet ip.IP4Net) error {
-	sub, asof, err := m.registry.getSubnet(ctx, subnet)
-	if err != nil {
-		return err
-	}
-
-	// add back the TTL
-	_, err = m.registry.updateSubnet(ctx, subnet, &sub.Attrs, subnetTTL, asof)
-	if isErrEtcdTestFailed(err) {
-		return errTryAgain
-	}
-	return err
-}
-
-//RemoveReservation removes the subnet by setting TTL back to subnetTTL (24hours)
-func (m *LocalManager) RemoveReservation(ctx context.Context, subnet ip.IP4Net) error {
-	for i := 0; i < raceRetries; i++ {
-		err := m.tryRemoveReservation(ctx, subnet)
-		switch {
-		case err == nil:
-			return nil
-		case err == errTryAgain:
-			continue
-		default:
-			return err
-		}
-	}
-
-	return ErrNoMoreTries
-}
-
-func (m *LocalManager) ListReservations(ctx context.Context) ([]Reservation, error) {
-	subnets, _, err := m.registry.getSubnets(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	rsvs := []Reservation{}
-	for _, sub := range subnets {
-		// Reservations don't have TTL and so no expiration
-		if !sub.Expiration.IsZero() {
-			continue
-		}
-
-		r := Reservation{
-			Subnet:   sub.Subnet,
-			PublicIP: sub.Attrs.PublicIP,
-		}
-		rsvs = append(rsvs, r)
-	}
-
-	return rsvs, nil
+	return fmt.Sprintf("Etcd Local Manager with Previous Subnet: %s", previousSubnet)
 }

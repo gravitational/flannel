@@ -19,9 +19,9 @@ import (
 	"io"
 	"strings"
 
-	"os/exec"
-
 	"encoding/json"
+	"os/exec"
+	"sync"
 
 	log "github.com/golang/glog"
 
@@ -55,7 +55,7 @@ func (_ *ExtensionBackend) Run(ctx context.Context) {
 	<-ctx.Done()
 }
 
-func (be *ExtensionBackend) RegisterNetwork(ctx context.Context, config *subnet.Config) (backend.Network, error) {
+func (be *ExtensionBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
 	n := &network{
 		extIface: be.extIface,
 		sm:       be.sm,
@@ -115,6 +115,7 @@ func (be *ExtensionBackend) RegisterNetwork(ctx context.Context, config *subnet.
 
 	if len(n.postStartupCommand) > 0 {
 		cmd_output, err := runCmd([]string{
+			fmt.Sprintf("NETWORK=%s", config.Network),
 			fmt.Sprintf("SUBNET=%s", lease.Subnet),
 			fmt.Sprintf("PUBLIC_IP=%s", attrs.PublicIP)},
 			"", "sh", "-c", n.postStartupCommand)

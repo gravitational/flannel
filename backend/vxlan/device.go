@@ -1,3 +1,5 @@
+// +build !windows
+
 // Copyright 2015 flannel authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,19 +13,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build !windows
 
 package vxlan
 
 import (
 	"fmt"
 	"net"
-	"os"
 	"syscall"
-	"time"
 
 	log "github.com/golang/glog"
 	"github.com/vishvananda/netlink"
-	"github.com/vishvananda/netlink/nl"
 
 	"github.com/coreos/flannel/pkg/ip"
 )
@@ -38,18 +38,8 @@ type vxlanDeviceAttrs struct {
 }
 
 type vxlanDevice struct {
-	link *netlink.Vxlan
-}
-
-func sysctlSet(path, value string) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = f.Write([]byte(value))
-	return err
+	link          *netlink.Vxlan
+	directRouting bool
 }
 
 func newVXLANDevice(devAttrs *vxlanDeviceAttrs) (*vxlanDevice, error) {
@@ -69,12 +59,6 @@ func newVXLANDevice(devAttrs *vxlanDeviceAttrs) (*vxlanDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	// this enables ARP requests being sent to userspace via netlink
-	sysctlPath := fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/app_solicit", devAttrs.name)
-	if err := sysctlSet(sysctlPath, "3"); err != nil {
-		return nil, err
-	}
-
 	return &vxlanDevice{
 		link: link,
 	}, nil
@@ -84,6 +68,7 @@ func ensureLink(vxlan *netlink.Vxlan) (*netlink.Vxlan, error) {
 	err := netlink.LinkAdd(vxlan)
 	if err == syscall.EEXIST {
 		// it's ok if the device already exists as long as config is similar
+		log.V(1).Infof("VXLAN device already exists")
 		existing, err := netlink.LinkByName(vxlan.Name)
 		if err != nil {
 			return nil, err
@@ -91,6 +76,7 @@ func ensureLink(vxlan *netlink.Vxlan) (*netlink.Vxlan, error) {
 
 		incompat := vxlanLinksIncompat(vxlan, existing)
 		if incompat == "" {
+			log.V(1).Infof("Returning existing device")
 			return existing.(*netlink.Vxlan), nil
 		}
 
@@ -123,36 +109,19 @@ func ensureLink(vxlan *netlink.Vxlan) (*netlink.Vxlan, error) {
 }
 
 func (dev *vxlanDevice) Configure(ipn ip.IP4Net) error {
-	setAddr4(dev.link, ipn.ToIPNet())
+	if err := ip.EnsureV4AddressOnLink(ipn, dev.link); err != nil {
+		return fmt.Errorf("failed to ensure address of interface %s: %s", dev.link.Attrs().Name, err)
+	}
 
 	if err := netlink.LinkSetUp(dev.link); err != nil {
 		return fmt.Errorf("failed to set interface %s to UP state: %s", dev.link.Attrs().Name, err)
 	}
 
-	// explicitly add a route since there might be a route for a subnet already
-	// installed by Docker and then it won't get auto added
-	route := netlink.Route{
-		LinkIndex: dev.link.Attrs().Index,
-		Scope:     netlink.SCOPE_UNIVERSE,
-		Dst:       ipn.Network().ToIPNet(),
-	}
-	if err := netlink.RouteAdd(&route); err != nil && err != syscall.EEXIST {
-		return fmt.Errorf("failed to add route (%s -> %s): %v", ipn.Network().String(), dev.link.Attrs().Name, err)
-	}
-
 	return nil
-}
-
-func (dev *vxlanDevice) Destroy() {
-	netlink.LinkDel(dev.link)
 }
 
 func (dev *vxlanDevice) MACAddr() net.HardwareAddr {
 	return dev.link.HardwareAddr
-}
-
-func (dev *vxlanDevice) MTU() int {
-	return dev.link.MTU
 }
 
 type neighbor struct {
@@ -160,14 +129,9 @@ type neighbor struct {
 	IP  ip.IP4
 }
 
-func (dev *vxlanDevice) GetL2List() ([]netlink.Neigh, error) {
-	log.V(4).Infof("calling GetL2List() dev.link.Index: %d ", dev.link.Index)
-	return netlink.NeighList(dev.link.Index, syscall.AF_BRIDGE)
-}
-
-func (dev *vxlanDevice) AddL2(n neighbor) error {
-	log.V(4).Infof("calling NeighAdd: %v, %v", n.IP, n.MAC)
-	return netlink.NeighAdd(&netlink.Neigh{
+func (dev *vxlanDevice) AddFDB(n neighbor) error {
+	log.V(4).Infof("calling AddFDB: %v, %v", n.IP, n.MAC)
+	return netlink.NeighSet(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
 		State:        netlink.NUD_PERMANENT,
 		Family:       syscall.AF_BRIDGE,
@@ -177,8 +141,8 @@ func (dev *vxlanDevice) AddL2(n neighbor) error {
 	})
 }
 
-func (dev *vxlanDevice) DelL2(n neighbor) error {
-	log.V(4).Infof("calling NeighDel: %v, %v", n.IP, n.MAC)
+func (dev *vxlanDevice) DelFDB(n neighbor) error {
+	log.V(4).Infof("calling DelFDB: %v, %v", n.IP, n.MAC)
 	return netlink.NeighDel(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
 		Family:       syscall.AF_BRIDGE,
@@ -188,75 +152,26 @@ func (dev *vxlanDevice) DelL2(n neighbor) error {
 	})
 }
 
-func (dev *vxlanDevice) AddL3(n neighbor) error {
-	log.V(4).Infof("calling NeighSet: %v, %v", n.IP, n.MAC)
+func (dev *vxlanDevice) AddARP(n neighbor) error {
+	log.V(4).Infof("calling AddARP: %v, %v", n.IP, n.MAC)
 	return netlink.NeighSet(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
-		State:        netlink.NUD_REACHABLE,
+		State:        netlink.NUD_PERMANENT,
 		Type:         syscall.RTN_UNICAST,
 		IP:           n.IP.ToIP(),
 		HardwareAddr: n.MAC,
 	})
 }
 
-func (dev *vxlanDevice) DelL3(n neighbor) error {
-	log.V(4).Infof("calling NeighDel: %v, %v", n.IP, n.MAC)
+func (dev *vxlanDevice) DelARP(n neighbor) error {
+	log.V(4).Infof("calling DelARP: %v, %v", n.IP, n.MAC)
 	return netlink.NeighDel(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
-		State:        netlink.NUD_REACHABLE,
+		State:        netlink.NUD_PERMANENT,
 		Type:         syscall.RTN_UNICAST,
 		IP:           n.IP.ToIP(),
 		HardwareAddr: n.MAC,
 	})
-}
-
-func (dev *vxlanDevice) MonitorMisses(misses chan *netlink.Neigh) {
-	nlsock, err := nl.Subscribe(syscall.NETLINK_ROUTE, syscall.RTNLGRP_NEIGH)
-	if err != nil {
-		log.Error("Failed to subscribe to netlink RTNLGRP_NEIGH messages")
-		return
-	}
-
-	for {
-		msgs, err := nlsock.Receive()
-		if err != nil {
-			log.Errorf("Failed to receive from netlink: %v ", err)
-
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		for _, msg := range msgs {
-			dev.processNeighMsg(msg, misses)
-		}
-	}
-}
-
-func isNeighResolving(state int) bool {
-	return (state & (netlink.NUD_INCOMPLETE | netlink.NUD_STALE | netlink.NUD_DELAY | netlink.NUD_PROBE)) != 0
-}
-
-func (dev *vxlanDevice) processNeighMsg(msg syscall.NetlinkMessage, misses chan *netlink.Neigh) {
-	neigh, err := netlink.NeighDeserialize(msg.Data)
-	if err != nil {
-		log.Error("Failed to deserialize netlink ndmsg: %v", err)
-		return
-	}
-
-	if neigh.LinkIndex != dev.link.Index {
-		return
-	}
-
-	if msg.Header.Type != syscall.RTM_GETNEIGH && msg.Header.Type != syscall.RTM_NEWNEIGH {
-		return
-	}
-
-	if !isNeighResolving(neigh.State) {
-		// misses come with NUD_STALE bit set
-		return
-	}
-
-	misses <- neigh
 }
 
 func vxlanLinksIncompat(l1, l2 netlink.Link) string {
@@ -291,19 +206,9 @@ func vxlanLinksIncompat(l1, l2 netlink.Link) string {
 		return fmt.Sprintf("port: %v vs %v", v1.Port, v2.Port)
 	}
 
-	return ""
-}
-
-// sets IP4 addr on link
-func setAddr4(link *netlink.Vxlan, ipn *net.IPNet) error {
-	// Ensure that the device has a /32 address so that no broadcast routes are created.
-	// This IP is just used as a source address for host to workload traffic (so
-	// the return path for the traffic has a decent address to use as the destination)
-	ipn.Mask = net.CIDRMask(32, 32)
-	addr := netlink.Addr{IPNet: ipn, Label: ""}
-	if err := netlink.AddrAdd(link, &addr); err != nil {
-		return fmt.Errorf("failed to add IP address %s to %s: %s", ipn.String(), link.Attrs().Name, err)
+	if v1.GBP != v2.GBP {
+		return fmt.Sprintf("gbp: %v vs %v", v1.GBP, v2.GBP)
 	}
 
-	return nil
+	return ""
 }

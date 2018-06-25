@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -50,10 +51,11 @@ const (
 	resyncPeriod              = 5 * time.Minute
 	nodeControllerSyncTimeout = 10 * time.Minute
 
-	subnetKubeManagedAnnotation = "flannel.alpha.coreos.com/kube-subnet-manager"
-	backendDataAnnotation       = "flannel.alpha.coreos.com/backend-data"
-	backendTypeAnnotation       = "flannel.alpha.coreos.com/backend-type"
-	backendPublicIPAnnotation   = "flannel.alpha.coreos.com/public-ip"
+	subnetKubeManagedAnnotation        = "flannel.alpha.coreos.com/kube-subnet-manager"
+	backendDataAnnotation              = "flannel.alpha.coreos.com/backend-data"
+	backendTypeAnnotation              = "flannel.alpha.coreos.com/backend-type"
+	backendPublicIPAnnotation          = "flannel.alpha.coreos.com/public-ip"
+	backendPublicIPOverwriteAnnotation = "flannel.alpha.coreos.com/public-ip-overwrite"
 
 	netConfPath = "/etc/kube-flannel/net-conf.json"
 )
@@ -67,29 +69,47 @@ type kubeSubnetManager struct {
 	events         chan subnet.Event
 }
 
-func NewSubnetManager() (subnet.Manager, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, fmt.Errorf("unable to initialize inclusterconfig: %v", err)
+func NewSubnetManager(apiUrl, kubeconfig string) (subnet.Manager, error) {
+
+	var cfg *rest.Config
+	var err error
+	// Use out of cluster config if the URL or kubeconfig have been specified. Otherwise use incluster config.
+	if apiUrl != "" || kubeconfig != "" {
+		cfg, err = clientcmd.BuildConfigFromFlags(apiUrl, kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create k8s config: %v", err)
+		}
+	} else {
+		cfg, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize inclusterconfig: %v", err)
+		}
 	}
+
 	c, err := clientset.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize client: %v", err)
 	}
 
-	podName := os.Getenv("POD_NAME")
-	podNamespace := os.Getenv("POD_NAMESPACE")
-	if podName == "" || podNamespace == "" {
-		return nil, fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
-	}
-
-	pod, err := c.Pods(podNamespace).Get(podName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
-	}
-	nodeName := pod.Spec.NodeName
+	// The kube subnet mgr needs to know the k8s node name that it's running on so it can annotate it.
+	// If we're running as a pod then the POD_NAME and POD_NAMESPACE will be populated and can be used to find the node
+	// name. Otherwise, the environment variable NODE_NAME can be passed in.
+	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		return nil, fmt.Errorf("node name not present in pod spec '%s/%s'", podNamespace, podName)
+		podName := os.Getenv("POD_NAME")
+		podNamespace := os.Getenv("POD_NAMESPACE")
+		if podName == "" || podNamespace == "" {
+			return nil, fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
+		}
+
+		pod, err := c.Pods(podNamespace).Get(podName, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving pod spec for '%s/%s': %v", podNamespace, podName, err)
+		}
+		nodeName = pod.Spec.NodeName
+		if nodeName == "" {
+			return nil, fmt.Errorf("node name not present in pod spec '%s/%s'", podNamespace, podName)
+		}
 	}
 
 	netConf, err := ioutil.ReadFile(netConfPath)
@@ -216,10 +236,20 @@ func (ksm *kubeSubnetManager) AcquireLease(ctx context.Context, attrs *subnet.Le
 	if n.Annotations[backendDataAnnotation] != string(bd) ||
 		n.Annotations[backendTypeAnnotation] != attrs.BackendType ||
 		n.Annotations[backendPublicIPAnnotation] != attrs.PublicIP.String() ||
-		n.Annotations[subnetKubeManagedAnnotation] != "true" {
+		n.Annotations[subnetKubeManagedAnnotation] != "true" ||
+		(n.Annotations[backendPublicIPOverwriteAnnotation] != "" && n.Annotations[backendPublicIPOverwriteAnnotation] != attrs.PublicIP.String()) {
 		n.Annotations[backendTypeAnnotation] = attrs.BackendType
 		n.Annotations[backendDataAnnotation] = string(bd)
-		n.Annotations[backendPublicIPAnnotation] = attrs.PublicIP.String()
+		if n.Annotations[backendPublicIPOverwriteAnnotation] != "" {
+			if n.Annotations[backendPublicIPAnnotation] != n.Annotations[backendPublicIPOverwriteAnnotation] {
+				glog.Infof("Overriding public ip with '%s' from node annotation '%s'",
+					n.Annotations[backendPublicIPOverwriteAnnotation],
+					backendPublicIPOverwriteAnnotation)
+				n.Annotations[backendPublicIPAnnotation] = n.Annotations[backendPublicIPOverwriteAnnotation]
+			}
+		} else {
+			n.Annotations[backendPublicIPAnnotation] = attrs.PublicIP.String()
+		}
 		n.Annotations[subnetKubeManagedAnnotation] = "true"
 
 		oldData, err := json.Marshal(cachedNode)
@@ -292,18 +322,6 @@ func (ksm *kubeSubnetManager) WatchLease(ctx context.Context, sn ip.IP4Net, curs
 	return subnet.LeaseWatchResult{}, ErrUnimplemented
 }
 
-func (ksm *kubeSubnetManager) RevokeLease(ctx context.Context, sn ip.IP4Net) error {
-	return ErrUnimplemented
-}
-
-func (ksm *kubeSubnetManager) AddReservation(ctx context.Context, r *subnet.Reservation) error {
-	return ErrUnimplemented
-}
-
-func (ksm *kubeSubnetManager) RemoveReservation(ctx context.Context, subnet ip.IP4Net) error {
-	return ErrUnimplemented
-}
-
-func (ksm *kubeSubnetManager) ListReservations(ctx context.Context) ([]subnet.Reservation, error) {
-	return nil, ErrUnimplemented
+func (ksm *kubeSubnetManager) Name() string {
+	return fmt.Sprintf("Kubernetes Subnet Manager - %s", ksm.nodeName)
 }

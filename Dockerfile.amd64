@@ -1,12 +1,12 @@
-FROM frolvlad/alpine-glibc
+FROM alpine
 
-MAINTAINER Tom Denham <tom@tigera.io>
+LABEL maintainer="Tom Denham <tom@tigera.io>"
 
 ENV FLANNEL_ARCH=amd64
 
-RUN apk add --no-cache iproute2 net-tools
+RUN apk add --no-cache iproute2 net-tools ca-certificates iptables strongswan && update-ca-certificates
+RUN apk add wireguard-tools --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing
 COPY dist/flanneld-$FLANNEL_ARCH /opt/bin/flanneld
-COPY dist/iptables-$FLANNEL_ARCH /usr/local/bin/iptables
 COPY dist/mk-docker-opts.sh /opt/bin/
 
 ENTRYPOINT ["/opt/bin/flanneld"]

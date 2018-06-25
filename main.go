@@ -19,9 +19,12 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -38,6 +41,10 @@ import (
 
 	"time"
 
+	"github.com/joho/godotenv"
+
+	"sync"
+
 	// Backends need to be imported for their init() to get executed and them to register
 	"github.com/coreos/flannel/backend"
 	_ "github.com/coreos/flannel/backend/alivpc"
@@ -46,10 +53,23 @@ import (
 	_ "github.com/coreos/flannel/backend/extension"
 	_ "github.com/coreos/flannel/backend/gce"
 	_ "github.com/coreos/flannel/backend/hostgw"
+	_ "github.com/coreos/flannel/backend/ipip"
+	_ "github.com/coreos/flannel/backend/ipsec"
 	_ "github.com/coreos/flannel/backend/udp"
 	_ "github.com/coreos/flannel/backend/vxlan"
 	"github.com/coreos/go-systemd/daemon"
 )
+
+type flagSlice []string
+
+func (t *flagSlice) String() string {
+	return fmt.Sprintf("%v", *t)
+}
+
+func (t *flagSlice) Set(val string) error {
+	*t = append(*t, val)
+	return nil
+}
 
 type CmdLineOpts struct {
 	etcdEndpoints          string
@@ -62,7 +82,10 @@ type CmdLineOpts struct {
 	help                   bool
 	version                bool
 	kubeSubnetMgr          bool
-	iface                  string
+	kubeApiUrl             string
+	kubeConfigFile         string
+	iface                  flagSlice
+	ifaceRegex             flagSlice
 	ipMasq                 bool
 	subnetFile             string
 	subnetDir              string
@@ -73,40 +96,76 @@ type CmdLineOpts struct {
 	kubeCert               string
 	kubeKey                string
 	kubeCA                 string
+	healthzIP              string
+	healthzPort            int
+	charonExecutablePath   string
+	charonViciUri          string
+	iptablesResyncSeconds  int
 }
 
 var (
 	opts           CmdLineOpts
 	errInterrupted = errors.New("interrupted")
 	errCanceled    = errors.New("canceled")
+	flannelFlags   = flag.NewFlagSet("flannel", flag.ExitOnError)
 )
 
 func init() {
-	flag.StringVar(&opts.etcdEndpoints, "etcd-endpoints", "http://127.0.0.1:4001,http://127.0.0.1:2379", "a comma-delimited list of etcd endpoints")
-	flag.StringVar(&opts.etcdPrefix, "etcd-prefix", "/coreos.com/network", "etcd prefix")
-	flag.StringVar(&opts.etcdKeyfile, "etcd-keyfile", "", "SSL key file used to secure etcd communication")
-	flag.StringVar(&opts.etcdCertfile, "etcd-certfile", "", "SSL certification file used to secure etcd communication")
-	flag.StringVar(&opts.etcdCAFile, "etcd-cafile", "", "SSL Certificate Authority file used to secure etcd communication")
-	flag.StringVar(&opts.etcdUsername, "etcd-username", "", "Username for BasicAuth to etcd")
-	flag.StringVar(&opts.etcdPassword, "etcd-password", "", "Password for BasicAuth to etcd")
-	flag.StringVar(&opts.iface, "iface", "", "interface to use (IP or name) for inter-host communication")
-	flag.StringVar(&opts.subnetFile, "subnet-file", "/run/flannel/subnet.env", "filename where env variables (subnet, MTU, ... ) will be written to")
-	flag.StringVar(&opts.publicIP, "public-ip", "", "IP accessible by other nodes for inter-host communication")
-	flag.StringVar(&opts.kubeAPIServer, "kube-apiserver", "", "Kubernetes API server address in host:port format")
-	flag.StringVar(&opts.kubeNode, "kube-node", "", "Kubernetes node name flannel is running on")
-	flag.StringVar(&opts.kubeCert, "kube-cert", "", "Kubernetes API server certificate file used for client auth")
-	flag.StringVar(&opts.kubeKey, "kube-key", "", "Kubernetes API server private key file used for client auth")
-	flag.StringVar(&opts.kubeCA, "kube-ca", "", "Kubernetes API server CA file used for client auth")
-	flag.IntVar(&opts.subnetLeaseRenewMargin, "subnet-lease-renew-margin", 60, "Subnet lease renewal margin, in minutes.")
-	flag.BoolVar(&opts.ipMasq, "ip-masq", false, "setup IP masquerade rule for traffic destined outside of overlay network")
-	flag.BoolVar(&opts.kubeSubnetMgr, "kube-subnet-mgr", false, "Contact the Kubernetes API for subnet assignement instead of etcd.")
-	flag.BoolVar(&opts.help, "help", false, "print this message")
-	flag.BoolVar(&opts.version, "version", false, "print version and exit")
+	flannelFlags.StringVar(&opts.etcdEndpoints, "etcd-endpoints", "http://127.0.0.1:4001,http://127.0.0.1:2379", "a comma-delimited list of etcd endpoints")
+	flannelFlags.StringVar(&opts.etcdPrefix, "etcd-prefix", "/coreos.com/network", "etcd prefix")
+	flannelFlags.StringVar(&opts.etcdKeyfile, "etcd-keyfile", "", "SSL key file used to secure etcd communication")
+	flannelFlags.StringVar(&opts.etcdCertfile, "etcd-certfile", "", "SSL certification file used to secure etcd communication")
+	flannelFlags.StringVar(&opts.etcdCAFile, "etcd-cafile", "", "SSL Certificate Authority file used to secure etcd communication")
+	flannelFlags.StringVar(&opts.etcdUsername, "etcd-username", "", "username for BasicAuth to etcd")
+	flannelFlags.StringVar(&opts.etcdPassword, "etcd-password", "", "password for BasicAuth to etcd")
+	flannelFlags.Var(&opts.iface, "iface", "interface to use (IP or name) for inter-host communication. Can be specified multiple times to check each option in order. Returns the first match found.")
+	flannelFlags.Var(&opts.ifaceRegex, "iface-regex", "regex expression to match the first interface to use (IP or name) for inter-host communication. Can be specified multiple times to check each regex in order. Returns the first match found. Regexes are checked after specific interfaces specified by the iface option have already been checked.")
+	flannelFlags.StringVar(&opts.subnetFile, "subnet-file", "/run/flannel/subnet.env", "filename where env variables (subnet, MTU, ... ) will be written to")
+	flannelFlags.StringVar(&opts.publicIP, "public-ip", "", "IP accessible by other nodes for inter-host communication")
+	flannelFlags.IntVar(&opts.subnetLeaseRenewMargin, "subnet-lease-renew-margin", 60, "subnet lease renewal margin, in minutes, ranging from 1 to 1439")
+	flannelFlags.BoolVar(&opts.ipMasq, "ip-masq", false, "setup IP masquerade rule for traffic destined outside of overlay network")
+	flannelFlags.BoolVar(&opts.kubeSubnetMgr, "kube-subnet-mgr", false, "contact the Kubernetes API for subnet assignment instead of etcd.")
+	flannelFlags.StringVar(&opts.kubeApiUrl, "kube-api-url", "", "Kubernetes API server URL. Does not need to be specified if flannel is running in a pod.")
+	flannelFlags.StringVar(&opts.kubeConfigFile, "kubeconfig-file", "", "kubeconfig file location. Does not need to be specified if flannel is running in a pod.")
+	flannelFlags.BoolVar(&opts.version, "version", false, "print version and exit")
+	flannelFlags.StringVar(&opts.healthzIP, "healthz-ip", "0.0.0.0", "the IP address for healthz server to listen")
+	flannelFlags.IntVar(&opts.healthzPort, "healthz-port", 0, "the port for healthz server to listen(0 to disable)")
+	flannelFlags.IntVar(&opts.iptablesResyncSeconds, "iptables-resync", 5, "resync period for iptables rules, in seconds")
+	flannelFlags.StringVar(&opts.kubeAPIServer, "kube-apiserver", "", "Kubernetes API server address in host:port format")
+	flannelFlags.StringVar(&opts.kubeNode, "kube-node", "", "Kubernetes node name flannel is running on")
+	flannelFlags.StringVar(&opts.kubeCert, "kube-cert", "", "Kubernetes API server certificate file used for client auth")
+	flannelFlags.StringVar(&opts.kubeKey, "kube-key", "", "Kubernetes API server private key file used for client auth")
+	flannelFlags.StringVar(&opts.kubeCA, "kube-ca", "", "Kubernetes API server CA file used for client auth")
+
+	// glog will log to tmp files by default. override so all entries
+	// can flow into journald (if running under systemd)
+	flag.Set("logtostderr", "true")
+
+	// Only copy the non file logging options from glog
+	copyFlag("v")
+	copyFlag("vmodule")
+	copyFlag("log_backtrace_at")
+
+	// Define the usage function
+	flannelFlags.Usage = usage
+
+	// now parse command line args
+	flannelFlags.Parse(os.Args[1:])
+}
+
+func copyFlag(name string) {
+	flannelFlags.Var(flag.Lookup(name).Value, flag.Lookup(name).Name, flag.Lookup(name).Usage)
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]...\n", os.Args[0])
+	flannelFlags.PrintDefaults()
+	os.Exit(0)
 }
 
 func newSubnetManager() (subnet.Manager, error) {
 	if opts.kubeSubnetMgr {
-		return kube.NewSubnetManager()
+		return kube.NewSubnetManager(opts.kubeApiUrl, opts.kubeConfigFile)
 	}
 
 	cfg := &etcdv2.EtcdConfig{
@@ -119,35 +178,68 @@ func newSubnetManager() (subnet.Manager, error) {
 		Password:  opts.etcdPassword,
 	}
 
-	return etcdv2.NewLocalManager(cfg)
+	// Attempt to renew the lease for the subnet specified in the subnetFile
+	prevSubnet := ReadSubnetFromSubnetFile(opts.subnetFile)
+
+	return etcdv2.NewLocalManager(cfg, prevSubnet)
 }
 
 func main() {
-	// glog will log to tmp files by default. override so all entries
-	// can flow into journald (if running under systemd)
-	flag.Set("logtostderr", "true")
-
-	// now parse command line args
-	flag.Parse()
-
-	if flag.NArg() > 0 || opts.help {
-		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]...\n", os.Args[0])
-		flag.PrintDefaults()
-		os.Exit(0)
-	}
-
 	if opts.version {
 		fmt.Fprintln(os.Stderr, version.Version)
 		os.Exit(0)
 	}
 
-	flagutil.SetFlagsFromEnv(flag.CommandLine, "FLANNELD")
+	flagutil.SetFlagsFromEnv(flannelFlags, "FLANNELD")
+
+	// Validate flags
+	if opts.subnetLeaseRenewMargin >= 24*60 || opts.subnetLeaseRenewMargin <= 0 {
+		log.Error("Invalid subnet-lease-renew-margin option, out of acceptable range")
+		os.Exit(1)
+	}
 
 	// Work out which interface to use
-	extIface, err := LookupExtIface(opts.iface)
-	if err != nil {
-		log.Error("Failed to find interface to use: ", err)
-		os.Exit(1)
+	var extIface *backend.ExternalInterface
+	var err error
+	// Check the default interface only if no interfaces are specified
+	if len(opts.iface) == 0 && len(opts.ifaceRegex) == 0 {
+		extIface, err = LookupExtIface("", "")
+		if err != nil {
+			log.Error("Failed to find any valid interface to use: ", err)
+			os.Exit(1)
+		}
+	} else {
+		// Check explicitly specified interfaces
+		for _, iface := range opts.iface {
+			extIface, err = LookupExtIface(iface, "")
+			if err != nil {
+				log.Infof("Could not find valid interface matching %s: %s", iface, err)
+			}
+
+			if extIface != nil {
+				break
+			}
+		}
+
+		// Check interfaces that match any specified regexes
+		if extIface == nil {
+			for _, ifaceRegex := range opts.ifaceRegex {
+				extIface, err = LookupExtIface("", ifaceRegex)
+				if err != nil {
+					log.Infof("Could not find valid interface matching %s: %s", ifaceRegex, err)
+				}
+
+				if extIface != nil {
+					break
+				}
+			}
+		}
+
+		if extIface == nil {
+			// Exit if any of the specified interfaces do not match
+			log.Error("Failed to find interface to use that matches the interfaces and/or regexes provided")
+			os.Exit(1)
+		}
 	}
 
 	sm, err := newSubnetManager()
@@ -155,20 +247,37 @@ func main() {
 		log.Error("Failed to create SubnetManager: ", err)
 		os.Exit(1)
 	}
-	log.Infof("Created subnet manager: %+v", sm)
+	log.Infof("Created subnet manager: %s", sm.Name())
 
 	// Register for SIGINT and SIGTERM
 	log.Info("Installing signal handlers")
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
+	// This is the main context that everything should run in.
+	// All spawned goroutines should exit when cancel is called on this context.
+	// Go routines spawned from main.go coordinate using a WaitGroup. This provides a mechanism to allow the shutdownHandler goroutine
+	// to block until all the goroutines return . If those goroutines spawn other goroutines then they are responsible for
+	// blocking and returning only when cancel() is called.
 	ctx, cancel := context.WithCancel(context.Background())
-	go shutdown(sigs, cancel)
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		shutdownHandler(ctx, sigs, cancel)
+		wg.Done()
+	}()
+
+	if opts.healthzPort > 0 {
+		// It's not super easy to shutdown the HTTP server so don't attempt to stop it cleanly
+		go mustRunHealthz()
+	}
 
 	// Fetch the network config (i.e. what backend to use etc..).
 	config, err := getConfig(ctx, sm)
 	if err == errCanceled {
-		exit()
+		wg.Wait()
+		os.Exit(0)
 	}
 
 	// Create a backend manager then use it to create the backend and register the network with it.
@@ -176,29 +285,28 @@ func main() {
 	be, err := bm.GetBackend(config.BackendType)
 	if err != nil {
 		log.Errorf("Error fetching backend: %s", err)
-		exit()
+		cancel()
+		wg.Wait()
+		os.Exit(1)
 	}
 
-	bn, err := be.RegisterNetwork(ctx, config)
+	bn, err := be.RegisterNetwork(ctx, wg, config)
 	if err != nil {
 		log.Errorf("Error registering network: %s", err)
-		exit()
+		cancel()
+		wg.Wait()
+		os.Exit(1)
 	}
 
 	// Set up ipMasq if needed
 	if opts.ipMasq {
-		err = network.SetupIPMasq(config.Network)
-		if err != nil {
-			// Continue, even though it failed.
-			log.Errorf("Failed to set up IP Masquerade: %v", err)
-		}
-
-		defer func() {
-			if err := network.TeardownIPMasq(config.Network); err != nil {
-				log.Errorf("Failed to tear down IP Masquerade: %v", err)
-			}
-		}()
+		go network.SetupAndEnsureIPTables(network.MasqRules(config.Network, bn.Lease()), opts.iptablesResyncSeconds)
 	}
+
+	// Always enables forwarding rules. This is needed for Docker versions >1.13 (https://docs.docker.com/engine/userguide/networking/default_network/container-communication/#container-communication-between-hosts)
+	// In Docker 1.12 and earlier, the default FORWARD chain policy was ACCEPT.
+	// In Docker 1.13 and later, Docker sets the default policy of the FORWARD chain to DROP.
+	go network.SetupAndEnsureIPTables(network.ForwardRules(config.Network.String()), opts.iptablesResyncSeconds)
 
 	if err := WriteSubnetFile(opts.subnetFile, config.Network, opts.ipMasq, bn); err != nil {
 		// Continue, even though it failed.
@@ -206,9 +314,6 @@ func main() {
 	} else {
 		log.Infof("Wrote subnet file to %s", opts.subnetFile)
 	}
-
-	// Start "Running" the backend network. This will block until the context is done so run in another goroutine.
-	go bn.Run(ctx)
 
 	// When running on GCE with cloud integration, the node comes up explicitly
 	// marked with NodeUnavailable status which flannel needs to reset after
@@ -218,40 +323,44 @@ func main() {
 	}
 
 	log.Infof("Finished starting backend.")
+	log.Info("Running backend.")
+	wg.Add(1)
+	go func() {
+		bn.Run(ctx)
+		wg.Done()
+	}()
 
 	daemon.SdNotify(false, "READY=1")
 
 	// Kube subnet mgr doesn't lease the subnet for this node - it just uses the podCidr that's already assigned.
-	if opts.kubeSubnetMgr {
-		// Wait for the shutdown to be signalled
-		<-ctx.Done()
-	} else {
-		// Block waiting to renew the lease
-		_ = MonitorLease(ctx, sm, bn)
+	if !opts.kubeSubnetMgr {
+		err = MonitorLease(ctx, sm, bn, &wg)
+		if err == errInterrupted {
+			// The lease was "revoked" - shut everything down
+			cancel()
+		}
 	}
 
-	// To get to here, the Cancel signal must have been received or the lease has been revoked.
-	exit()
-}
-
-func exit() {
-	// Wait just a second for the cancel signal to propagate everywhere, then just exit cleanly.
-	log.Info("Waiting for cancel to propagate...")
-	time.Sleep(time.Second)
-	log.Info("Exiting...")
+	log.Info("Waiting for all goroutines to exit")
+	// Block waiting for all the goroutines to finish.
+	wg.Wait()
+	log.Info("Exiting cleanly...")
 	os.Exit(0)
 }
 
-func shutdown(sigs chan os.Signal, cancel context.CancelFunc) {
-	// Wait for the shutdown signal.
-	<-sigs
+func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {
+	// Wait for the context do be Done or for the signal to come in to shutdown.
+	select {
+	case <-ctx.Done():
+		log.Info("Stopping shutdownHandler...")
+	case <-sigs:
+		// Call cancel on the context to close everything down.
+		cancel()
+		log.Info("shutdownHandler sent cancel signal...")
+	}
+
 	// Unregister to get default OS nuke behaviour in case we don't exit cleanly
 	signal.Stop(sigs)
-	log.Info("Starting shutdown...")
-
-	// Call cancel on the context to close everything down.
-	cancel()
-	log.Info("Sent cancel signal...")
 }
 
 func getConfig(ctx context.Context, sm subnet.Manager) (*subnet.Config, error) {
@@ -275,10 +384,16 @@ func getConfig(ctx context.Context, sm subnet.Manager) (*subnet.Config, error) {
 	}
 }
 
-func MonitorLease(ctx context.Context, sm subnet.Manager, bn backend.Network) error {
+func MonitorLease(ctx context.Context, sm subnet.Manager, bn backend.Network, wg *sync.WaitGroup) error {
 	// Use the subnet manager to start watching leases.
 	evts := make(chan subnet.Event)
-	go subnet.WatchLease(ctx, sm, bn.Lease().Subnet, evts)
+
+	wg.Add(1)
+	go func() {
+		subnet.WatchLease(ctx, sm, bn.Lease().Subnet, evts)
+		wg.Done()
+	}()
+
 	renewMargin := time.Duration(opts.subnetLeaseRenewMargin) * time.Minute
 	dur := bn.Lease().Expiration.Sub(time.Now()) - renewMargin
 
@@ -314,7 +429,7 @@ func MonitorLease(ctx context.Context, sm subnet.Manager, bn backend.Network) er
 	}
 }
 
-func LookupExtIface(ifname string) (*backend.ExternalInterface, error) {
+func LookupExtIface(ifname string, ifregex string) (*backend.ExternalInterface, error) {
 	var iface *net.Interface
 	var ifaceAddr net.IP
 	var err error
@@ -331,6 +446,58 @@ func LookupExtIface(ifname string) (*backend.ExternalInterface, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error looking up interface %s: %s", ifname, err)
 			}
+		}
+	} else if len(ifregex) > 0 {
+		// Use the regex if specified and the iface option for matching a specific ip or name is not used
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			return nil, fmt.Errorf("error listing all interfaces: %s", err)
+		}
+
+		// Check IP
+		for _, ifaceToMatch := range ifaces {
+			ifaceIP, err := ip.GetIfaceIP4Addr(&ifaceToMatch)
+			if err != nil {
+				// Skip if there is no IPv4 address
+				continue
+			}
+
+			matched, err := regexp.MatchString(ifregex, ifaceIP.String())
+			if err != nil {
+				return nil, fmt.Errorf("regex error matching pattern %s to %s", ifregex, ifaceIP.String())
+			}
+
+			if matched {
+				ifaceAddr = ifaceIP
+				iface = &ifaceToMatch
+				break
+			}
+		}
+
+		// Check Name
+		if iface == nil && ifaceAddr == nil {
+			for _, ifaceToMatch := range ifaces {
+				matched, err := regexp.MatchString(ifregex, ifaceToMatch.Name)
+				if err != nil {
+					return nil, fmt.Errorf("regex error matching pattern %s to %s", ifregex, ifaceToMatch.Name)
+				}
+
+				if matched {
+					iface = &ifaceToMatch
+					break
+				}
+			}
+		}
+
+		// Check that nothing was matched
+		if iface == nil {
+			var availableFaces []string
+			for _, f := range ifaces {
+				ip, _ := ip.GetIfaceIP4Addr(&f) // We can safely ignore errors. We just won't log any ip
+				availableFaces = append(availableFaces, fmt.Sprintf("%s:%s", f.Name, ip))
+			}
+
+			return nil, fmt.Errorf("Could not match pattern %s to any of the available network interfaces (%s)", ifregex, strings.Join(availableFaces, ", "))
 		}
 	} else {
 		log.Info("Determining IP address of default interface")
@@ -402,4 +569,35 @@ func WriteSubnetFile(path string, nw ip.IP4Net, ipMasq bool, bn backend.Network)
 	// atomically visible with the contents
 	return os.Rename(tempFile, path)
 	//TODO - is this safe? What if it's not on the same FS?
+}
+
+func mustRunHealthz() {
+	address := net.JoinHostPort(opts.healthzIP, strconv.Itoa(opts.healthzPort))
+	log.Infof("Start healthz server on %s", address)
+
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("flanneld is running"))
+	})
+
+	if err := http.ListenAndServe(address, nil); err != nil {
+		log.Errorf("Start healthz server error. %v", err)
+		panic(err)
+	}
+}
+
+func ReadSubnetFromSubnetFile(path string) ip.IP4Net {
+	var prevSubnet ip.IP4Net
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		prevSubnetVals, err := godotenv.Read(path)
+		if err != nil {
+			log.Errorf("Couldn't fetch previous subnet from subnet file at %s: %s", path, err)
+		} else if prevSubnetString, ok := prevSubnetVals["FLANNEL_SUBNET"]; ok {
+			err = prevSubnet.UnmarshalJSON([]byte(prevSubnetString))
+			if err != nil {
+				log.Errorf("Couldn't parse previous subnet from subnet file at %s: %s", path, err)
+			}
+		}
+	}
+	return prevSubnet
 }
