@@ -1,14 +1,15 @@
 package netroute
 
 import (
-	"regexp"
-	"net"
-	"strconv"
-	"strings"
 	"bufio"
 	"bytes"
-	ps "github.com/gorillalabs/go-powershell"
-	psbe "github.com/gorillalabs/go-powershell/backend"
+	"net"
+	"regexp"
+	"strconv"
+	"strings"
+
+	ps "github.com/benmoss/go-powershell"
+	psbe "github.com/benmoss/go-powershell/backend"
 
 	"fmt"
 	"math/big"
