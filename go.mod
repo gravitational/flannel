@@ -1,4 +1,4 @@
-module flannel
+module github.com/coreos/flannel
 
 go 1.14
 
@@ -11,7 +11,6 @@ require (
 	github.com/bronze1man/goStrongswanVici v0.0.0-20171013065002-4d72634a2f11
 	github.com/containernetworking/plugins v0.8.6
 	github.com/coreos/etcd v3.1.11+incompatible
-	github.com/coreos/flannel v0.12.0
 	github.com/coreos/go-iptables v0.4.5
 	github.com/coreos/go-systemd v0.0.0-20180511133405-39ca1b05acc7
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
@@ -45,7 +44,7 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
 	github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
-	golang.org/x/net v0.0.0-20190311183353-d8887717615a
+	golang.org/x/net v0.0.0-20200707034311-ab3426394381
 	golang.org/x/oauth2 v0.0.0-20170629032740-5432cc9688e6
 	google.golang.org/api v0.0.0-20170627180304-e6586c9293b9
 	google.golang.org/appengine v0.0.0-20160823001527-4f7eeb5305a4 // indirect

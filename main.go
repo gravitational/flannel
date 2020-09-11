@@ -36,6 +36,7 @@ import (
 	"github.com/coreos/flannel/pkg/ip"
 	"github.com/coreos/flannel/subnet"
 	"github.com/coreos/flannel/subnet/etcdv2"
+	"github.com/coreos/flannel/subnet/kube"
 	"github.com/coreos/flannel/version"
 
 	"time"
@@ -163,9 +164,9 @@ func usage() {
 }
 
 func newSubnetManager() (subnet.Manager, error) {
-	//if opts.kubeSubnetMgr {
-	//	return kube.NewSubnetManager(opts.kubeApiUrl, opts.kubeConfigFile, opts.kubeAnnotationPrefix, opts.netConfPath)
-	//}
+	if opts.kubeSubnetMgr {
+		return kube.NewSubnetManager(opts.kubeApiUrl, opts.kubeConfigFile)
+	}
 
 	cfg := &etcdv2.EtcdConfig{
 		Endpoints: strings.Split(opts.etcdEndpoints, ","),
@@ -289,7 +290,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	bn, err := be.RegisterNetwork(ctx, wg, config)
+	bn, err := be.RegisterNetwork(ctx, &wg, config)
 	if err != nil {
 		log.Errorf("Error registering network: %s", err)
 		cancel()

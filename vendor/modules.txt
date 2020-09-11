@@ -1,28 +1,6 @@
 # cloud.google.com/go v0.9.1-0.20170629112852-7c205da84d8d
 ## explicit
 cloud.google.com/go/compute/metadata
-# github.com/Microsoft/go-winio v0.4.11
-github.com/Microsoft/go-winio
-# github.com/Microsoft/hcsshim v0.8.6
-github.com/Microsoft/hcsshim
-github.com/Microsoft/hcsshim/hcn
-github.com/Microsoft/hcsshim/internal/cni
-github.com/Microsoft/hcsshim/internal/guestrequest
-github.com/Microsoft/hcsshim/internal/guid
-github.com/Microsoft/hcsshim/internal/hcs
-github.com/Microsoft/hcsshim/internal/hcserror
-github.com/Microsoft/hcsshim/internal/hns
-github.com/Microsoft/hcsshim/internal/interop
-github.com/Microsoft/hcsshim/internal/logfields
-github.com/Microsoft/hcsshim/internal/longpath
-github.com/Microsoft/hcsshim/internal/mergemaps
-github.com/Microsoft/hcsshim/internal/regstate
-github.com/Microsoft/hcsshim/internal/runhcs
-github.com/Microsoft/hcsshim/internal/safefile
-github.com/Microsoft/hcsshim/internal/schema1
-github.com/Microsoft/hcsshim/internal/schema2
-github.com/Microsoft/hcsshim/internal/timeout
-github.com/Microsoft/hcsshim/internal/wclayer
 # github.com/PuerkitoBio/purell v1.0.0
 ## explicit
 github.com/PuerkitoBio/purell
@@ -58,9 +36,6 @@ github.com/aws/aws-sdk-go/service/ec2
 github.com/aws/aws-sdk-go/service/sts
 # github.com/benmoss/go-powershell v0.0.0-20190925205200-09527df358ca
 ## explicit
-github.com/benmoss/go-powershell
-github.com/benmoss/go-powershell/backend
-github.com/benmoss/go-powershell/utils
 # github.com/bronze1man/goStrongswanVici v0.0.0-20171013065002-4d72634a2f11
 ## explicit
 github.com/bronze1man/goStrongswanVici
@@ -75,26 +50,6 @@ github.com/coreos/etcd/pkg/pathutil
 github.com/coreos/etcd/pkg/tlsutil
 github.com/coreos/etcd/pkg/transport
 github.com/coreos/etcd/pkg/types
-# github.com/coreos/flannel v0.12.0
-## explicit
-github.com/coreos/flannel/backend
-github.com/coreos/flannel/backend/alivpc
-github.com/coreos/flannel/backend/alloc
-github.com/coreos/flannel/backend/awsvpc
-github.com/coreos/flannel/backend/extension
-github.com/coreos/flannel/backend/gce
-github.com/coreos/flannel/backend/hostgw
-github.com/coreos/flannel/backend/ipip
-github.com/coreos/flannel/backend/ipsec
-github.com/coreos/flannel/backend/udp
-github.com/coreos/flannel/backend/vxlan
-github.com/coreos/flannel/network
-github.com/coreos/flannel/pkg/ip
-github.com/coreos/flannel/pkg/ns
-github.com/coreos/flannel/subnet
-github.com/coreos/flannel/subnet/etcdv2
-github.com/coreos/flannel/subnet/kube
-github.com/coreos/flannel/version
 # github.com/coreos/go-iptables v0.4.5
 ## explicit
 github.com/coreos/go-iptables/iptables
@@ -170,7 +125,6 @@ github.com/joho/godotenv
 github.com/jonboulle/clockwork
 # github.com/juju/errors v0.0.0-20170703010042-c7d06af17c68
 ## explicit
-github.com/juju/errors
 # github.com/juju/ratelimit v0.0.0-20151125201925-77ed1c8a0121
 ## explicit
 github.com/juju/ratelimit
@@ -185,10 +139,7 @@ github.com/mailru/easyjson/jwriter
 ## explicit
 # github.com/rakelkar/gonetsh v0.0.0-20190930180311-e5c5ffe4bdf0
 ## explicit
-github.com/rakelkar/gonetsh/netroute
 github.com/rakelkar/gonetsh/netsh
-# github.com/sirupsen/logrus v1.0.6
-github.com/sirupsen/logrus
 # github.com/smartystreets/goconvey v1.6.4
 ## explicit
 # github.com/spf13/pflag v0.0.0-20151013200643-08b1a584251b
@@ -208,9 +159,9 @@ github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
 ## explicit
 github.com/vishvananda/netns
-# golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
+# golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20190311183353-d8887717615a
+# golang.org/x/net v0.0.0-20200707034311-ab3426394381
 ## explicit
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
@@ -225,10 +176,9 @@ golang.org/x/oauth2/google
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
-# golang.org/x/sys v0.0.0-20190616124812-15dcb6c0061f
+# golang.org/x/sys v0.0.0-20200323222414-85ca7c5b95cd
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-golang.org/x/sys/windows/registry
 # golang.org/x/text v0.3.0
 golang.org/x/text/cases
 golang.org/x/text/internal
