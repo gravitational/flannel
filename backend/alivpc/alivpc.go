@@ -18,10 +18,11 @@ package alivpc
 import (
 	"encoding/json"
 	"fmt"
-	log "github.com/golang/glog"
-	"golang.org/x/net/context"
 	"os"
 	"sync"
+
+	log "github.com/golang/glog"
+	"golang.org/x/net/context"
 
 	"github.com/coreos/flannel/backend"
 	"github.com/coreos/flannel/pkg/ip"
@@ -48,7 +49,7 @@ func New(sm subnet.Manager, extIface *backend.ExternalInterface) (backend.Backen
 	return &be, nil
 }
 
-func (be *AliVpcBackend) RegisterNetwork(ctx context.Context, wg sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
+func (be *AliVpcBackend) RegisterNetwork(ctx context.Context, wg *sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
 	// 1. Parse our configuration
 	cfg := struct {
 		AccessKeyID     string
