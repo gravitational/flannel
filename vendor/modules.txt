@@ -108,6 +108,9 @@ github.com/golang/protobuf/proto
 # github.com/google/gofuzz v0.0.0-20161122191042-44d81051d367
 ## explicit
 github.com/google/gofuzz
+# github.com/gravitational/trace v1.1.11
+## explicit
+github.com/gravitational/trace
 # github.com/howeyc/gopass v0.0.0-20160826175423-3ca23474a7c7
 ## explicit
 github.com/howeyc/gopass
@@ -140,6 +143,8 @@ github.com/mailru/easyjson/jwriter
 # github.com/rakelkar/gonetsh v0.0.0-20190930180311-e5c5ffe4bdf0
 ## explicit
 github.com/rakelkar/gonetsh/netsh
+# github.com/sirupsen/logrus v1.0.6
+github.com/sirupsen/logrus
 # github.com/smartystreets/goconvey v1.6.4
 ## explicit
 # github.com/spf13/pflag v0.0.0-20151013200643-08b1a584251b

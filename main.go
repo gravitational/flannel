@@ -298,15 +298,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set up ipMasq if needed
-	if opts.ipMasq {
-		go network.SetupAndEnsureIPTables(network.MasqRules(config.Network, bn.Lease()), opts.iptablesResyncSeconds)
+	err = network.Config{
+		Network:    config.Network.String(),
+		Lease:      bn.Lease().Subnet.String(),
+		Masquerade: opts.ipMasq,
+	}.SetupAndEnsureIPTables()
+	if err != nil {
+		log.Errorf("Error setting up iptables: %s", err)
+		cancel()
+		wg.Wait()
+		os.Exit(1)
 	}
-
-	// Always enables forwarding rules. This is needed for Docker versions >1.13 (https://docs.docker.com/engine/userguide/networking/default_network/container-communication/#container-communication-between-hosts)
-	// In Docker 1.12 and earlier, the default FORWARD chain policy was ACCEPT.
-	// In Docker 1.13 and later, Docker sets the default policy of the FORWARD chain to DROP.
-	go network.SetupAndEnsureIPTables(network.ForwardRules(config.Network.String()), opts.iptablesResyncSeconds)
 
 	if err := WriteSubnetFile(opts.subnetFile, config.Network, opts.ipMasq, bn); err != nil {
 		// Continue, even though it failed.
