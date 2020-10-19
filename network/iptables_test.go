@@ -37,6 +37,9 @@ type MockIPTables struct {
 
 func (mock *MockIPTables) ruleIndex(table string, chain string, rulespec []string) int {
 	for i, rule := range mock.rules {
+		// Operations such as clear chain need to match the table / chain name only and return the index regardless
+		// of the contents of rulespec. When called with an empty rulespec match only the table/chain names, otherwise
+		// match on the rulespec as well.
 		if len(rulespec) == 0 {
 			if rule.table == table && rule.chain == chain {
 				return i
