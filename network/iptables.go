@@ -49,10 +49,16 @@ func (r IPTablesRule) getRule() []string {
 }
 
 var (
-	FlannelMasqChain    = chain{nat, "FLANNEL-MASQ"}
-	FlannelForwardChain = chain{filter, "FLANNEL-FORWARD"}
+	// flannelMasqChain is a separate 'nat' table chain to hold flannel rules for SNAT when leaving / entering
+	// the overlay network.
+	flannelMasqChain = chain{nat, "FLANNEL-MASQ"}
 
-	chains = []chain{FlannelMasqChain, FlannelForwardChain}
+	// flannelForwardChain creates ACCEPT rules for forwarding overlay network traffic when the filter table forward
+	// chain is set to DROP by default. Ensures overlay network traffic can be forwarded.
+	flannelForwardChain = chain{filter, "FLANNEL-FORWARD"}
+
+	// chains is a list of table/chains used by flannel
+	chains = []chain{flannelMasqChain, flannelForwardChain}
 )
 
 type chain struct {
@@ -80,46 +86,62 @@ const (
 func (c Config) generateRules(ipt IPTables, masq bool) []IPTablesRule {
 	rules := make([]IPTablesRule, 0)
 
-	supportsRandomFully := ipt.HasRandomFully()
-
 	if masq {
+		supportsRandomFully := ipt.HasRandomFully()
+
 		// This rule makes sure we don't NAT traffic within overlay network (e.g. coming out of docker0)
 		rules = append(rules,
-			IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"-s", c.Network, "-d", c.Network, "-j", "RETURN"}, "flannel: internal overlay traffic"},
+			IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+				[]string{"-s", c.Network, "-d", c.Network, "-j", "RETURN"},
+				"flannel: internal overlay traffic"},
 		)
 
 		// NAT if it's not multicast traffic
 		if supportsRandomFully {
 			rules = append(rules,
-				IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"-s", c.Network, "!", "-d", "224.0.0.0/4", "-j", "MASQUERADE", "--random-fully"}, "flannel: nat outbound traffic"},
+				IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+					[]string{"-s", c.Network, "!", "-d", "224.0.0.0/4", "-j", "MASQUERADE", "--random-fully"},
+					"flannel: nat outbound traffic"},
 			)
 		} else {
 			rules = append(rules,
-				IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"-s", c.Network, "!", "-d", "224.0.0.0/4", "-j", "MASQUERADE"}, "flannel: nat outbound traffic"},
+				IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+					[]string{"-s", c.Network, "!", "-d", "224.0.0.0/4", "-j", "MASQUERADE"},
+					"flannel: nat outbound traffic"},
 			)
 		}
 
 		// Prevent performing Masquerade on external traffic which arrives from a Node that owns the container/pod IP address
 		rules = append(rules,
-			IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"!", "-s", c.Network, "-d", c.Lease, "-j", "RETURN"}, "flannel: preserve source ip to local"},
+			IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+				[]string{"!", "-s", c.Network, "-d", c.Lease, "-j", "RETURN"},
+				"flannel: preserve source ip to local"},
 		)
 
 		// Masquerade anything headed towards flannel from the host
 		if supportsRandomFully {
 			rules = append(rules,
-				IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"!", "-s", c.Network, "-d", c.Network, "-j", "MASQUERADE", "--random-fully"}, "flannel: snat to overlay"},
+				IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+					[]string{"!", "-s", c.Network, "-d", c.Network, "-j", "MASQUERADE", "--random-fully"},
+					"flannel: snat to overlay"},
 			)
 		} else {
 			rules = append(rules,
-				IPTablesRule{FlannelMasqChain.table, FlannelMasqChain.name, []string{"!", "-s", c.Network, "-d", c.Network, "-j", "MASQUERADE"}, "flannel: snat to overlay"},
+				IPTablesRule{flannelMasqChain.table, flannelMasqChain.name,
+					[]string{"!", "-s", c.Network, "-d", c.Network, "-j", "MASQUERADE"},
+					"flannel: snat to overlay"},
 			)
 		}
 
 	}
 
 	rules = append(rules,
-		IPTablesRule{FlannelForwardChain.table, FlannelForwardChain.name, []string{"-s", c.Network, "-j", "ACCEPT"}, "flannel: allow forwarding of overlay traffic"},
-		IPTablesRule{FlannelForwardChain.table, FlannelForwardChain.name, []string{"-d", c.Network, "-j", "ACCEPT"}, "flannel: allow forwarding of overlay traffic"},
+		IPTablesRule{flannelForwardChain.table, flannelForwardChain.name,
+			[]string{"-s", c.Network, "-j", "ACCEPT"},
+			"flannel: allow forwarding of overlay traffic"},
+		IPTablesRule{flannelForwardChain.table, flannelForwardChain.name,
+			[]string{"-d", c.Network, "-j", "ACCEPT"},
+			"flannel: allow forwarding of overlay traffic"},
 	)
 
 	rules = append(rules, c.generateJoinRules(masq)...)
@@ -127,18 +149,20 @@ func (c Config) generateRules(ipt IPTables, masq bool) []IPTablesRule {
 	return rules
 }
 
-func (c Config) generateJoinRules(masq bool) []IPTablesRule {
-	rules := make([]IPTablesRule, 0)
-
+func (c Config) generateJoinRules(masq bool) (rules []IPTablesRule) {
 	if masq {
 		// Invoke the flannel masquerade chain from the nat/postrouting chain
 		rules = append(rules,
-			IPTablesRule{FlannelMasqChain.table, postrouting, []string{"-j", FlannelMasqChain.name}, "flannel: nat rules for overlay network"},
+			IPTablesRule{flannelMasqChain.table, postrouting,
+				[]string{"-j", flannelMasqChain.name},
+				"flannel: nat rules for overlay network"},
 		)
 	}
 
 	rules = append(rules,
-		IPTablesRule{FlannelForwardChain.table, forward, []string{"-j", FlannelForwardChain.name}, "flannel: allow rules for overlay network"},
+		IPTablesRule{flannelForwardChain.table, forward,
+			[]string{"-j", flannelForwardChain.name},
+			"flannel: allow rules for overlay network"},
 	)
 
 	return rules
@@ -190,7 +214,7 @@ func (c Config) cleanupRules(ipt IPTables) {
 
 		err := ipt.ClearChain(chain.table, chain.name)
 		if err != nil {
-			glog.Info("Clear chain ", chain, " failed: ", err)
+			glog.Warning("Clear chain ", chain, " failed: ", err)
 		}
 	}
 
@@ -239,7 +263,7 @@ func (c Config) rulesOk(ipt IPTables) error {
 			return trace.Wrap(err)
 		}
 		if !exists {
-			return trace.NotFound("missing rule")
+			return trace.NotFound("missing rule detected: %v", rule.getRule())
 		}
 	}
 	return nil
@@ -247,8 +271,7 @@ func (c Config) rulesOk(ipt IPTables) error {
 
 func (c Config) ensureRules(ipt IPTables) {
 	err := c.rulesOk(ipt)
-	if err != nil && !trace.IsNotFound(err) {
-		glog.Error("Error checking iptables rules: ", trace.DebugReport(err))
+	if err == nil {
 		return
 	}
 
@@ -263,6 +286,8 @@ func (c Config) ensureRules(ipt IPTables) {
 			glog.Error("Error creating iptables rules: ", trace.DebugReport(err))
 		}
 	}
+
+	glog.Error("Error checking iptables rules: ", trace.DebugReport(err))
 }
 
 func (c Config) SetupAndEnsureIPTables() error {
@@ -275,11 +300,13 @@ func (c Config) SetupAndEnsureIPTables() error {
 		ticker := time.NewTicker(5 * time.Second)
 
 		c.cleanupRules(ipt)
-		_ = c.createRules(ipt)
 
-		for {
-			<-ticker.C
+		err = c.createRules(ipt)
+		if err != nil {
+			glog.Info("Create rules failed: ", trace.DebugReport(err))
+		}
 
+		for range ticker.C {
 			c.ensureRules(ipt)
 		}
 	}()

@@ -89,13 +89,11 @@ func (mock *MockIPTables) HasRandomFully() bool {
 func TestDeleteRules(t *testing.T) {
 	ipt := &MockIPTables{}
 
-	//setupIPTables(ipt, MasqRules(ip.IP4Net{}, lease()))
 	Config{Masquerade: true}.createRules(ipt)
 	if len(ipt.rules) != 8 {
 		t.Errorf("Should be 4 masqRules, 2 forward rules, 2 join rules, there are actually %d: %#v", len(ipt.rules), ipt.rules)
 	}
 
-	//teardownIPTables(ipt, MasqRules(ip.IP4Net{}, lease()))
 	Config{}.cleanupRules(ipt)
 	if len(ipt.rules) != 0 {
 		t.Errorf("Should be 0 masqRules, there are actually %d: %#v", len(ipt.rules), ipt.rules)

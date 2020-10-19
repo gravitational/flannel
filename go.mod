@@ -7,7 +7,6 @@ require (
 	github.com/PuerkitoBio/purell v1.0.0 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20160726150825-5bd2802263f2 // indirect
 	github.com/aws/aws-sdk-go v1.12.54
-	github.com/benmoss/go-powershell v0.0.0-20190925205200-09527df358ca // indirect
 	github.com/bronze1man/goStrongswanVici v0.0.0-20171013065002-4d72634a2f11
 	github.com/containernetworking/plugins v0.8.6
 	github.com/coreos/etcd v3.1.11+incompatible
@@ -32,9 +31,7 @@ require (
 	github.com/jmespath/go-jmespath v0.0.0-20160803190731-bd40a432e4c7 // indirect
 	github.com/joho/godotenv v0.0.0-20161216230537-726cc8b906e3
 	github.com/jonboulle/clockwork v0.1.0
-	github.com/juju/errors v0.0.0-20170703010042-c7d06af17c68 // indirect
 	github.com/juju/ratelimit v0.0.0-20151125201925-77ed1c8a0121 // indirect
-	github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd // indirect
 	github.com/mailru/easyjson v0.0.0-20160728113105-d5b7844b561a // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/rakelkar/gonetsh v0.0.0-20190930180311-e5c5ffe4bdf0
@@ -52,6 +49,7 @@ require (
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/inf.v0 v0.9.0 // indirect
 	gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0 // indirect
+	gopkg.in/yaml.v2 v2.0.0-20170712054546-1be3d31502d6 // indirect
 	k8s.io/apimachinery v0.0.0-20170513172009-9603df80256c
 	k8s.io/client-go v3.0.1-0.20170829130306-a95edf803628+incompatible
 	k8s.io/utils v0.0.0-20171219162953-0ab3217ce272 // indirect
