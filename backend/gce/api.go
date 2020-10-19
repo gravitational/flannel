@@ -16,12 +16,12 @@
 package gce
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	log "github.com/golang/glog"
 
-	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
 )
@@ -33,8 +33,14 @@ type gceAPI struct {
 	gceInstance    *compute.Instance
 }
 
+// limit auth scope to just the cloud-platform API's
+// https://developers.google.com/identity/protocols/oauth2/scopes
+func gceScopes() []string {
+	return []string{"https://www.googleapis.com/auth/cloud-platform"}
+}
+
 func newAPI() (*gceAPI, error) {
-	client, err := google.DefaultClient(oauth2.NoContext)
+	client, err := google.DefaultClient(context.TODO(), gceScopes()...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating client: %v", err)
 	}

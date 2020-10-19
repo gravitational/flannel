@@ -6,12 +6,7 @@ REGISTRY?=quay.io/coreos/flannel
 # Default tag and architecture. Can be overridden
 TAG?=$(shell git describe --tags --dirty)
 ARCH?=amd64
-# Only enable CGO (and build the UDP backend) on AMD64
-ifeq ($(ARCH),amd64)
-	CGO_ENABLED=1
-else
-	CGO_ENABLED=0
-endif
+CGO_ENABLED?=0
 
 # Go version to use for builds
 GO_VERSION=1.9.2
@@ -110,14 +105,14 @@ ifneq ($(ARCH),amd64)
 	$(MAKE) dist/qemu-$(ARCH)-static
 endif
 	# valid values for ARCH are [amd64 arm arm64 ppc64le s390x]
-	docker run -e GOARM=$(GOARM) \
+	docker run -e GOARM=$(GOARM) -e CGO_ENABLED=$(CGO_ENABLED) \
 		-u $(shell id -u):$(shell id -g) \
 		-v $(CURDIR):/go/src/github.com/coreos/flannel:ro \
 		-v $(CURDIR)/dist:/go/src/github.com/coreos/flannel/dist \
 		--tmpfs /.cache \
 		golang:1.13 /bin/bash -c '\
 		cd /go/src/github.com/coreos/flannel && \
-		CGO_ENABLED=1 make -e dist/flanneld && \
+		make -e dist/flanneld && \
 		mv dist/flanneld dist/flanneld-$(ARCH)'
 	docker build -f Dockerfile.$(ARCH) -t $(REGISTRY):$(TAG)-$(ARCH) .
 
@@ -208,13 +203,13 @@ update-glide:
 install:
 	# This is intended as just a developer convenience to help speed up non-containerized builds
 	# It is NOT how you install flannel
-	CGO_ENABLED=1 go install -v github.com/coreos/flannel
+	go install -v github.com/coreos/flannel
 
 minikube-start:
 	minikube start --network-plugin cni
 
 minikube-build-image:
-	CGO_ENABLED=1 go build -v -o dist/flanneld-amd64
+	go build -v -o dist/flanneld-amd64
 	# Make sure the minikube docker is being used "eval $(minikube docker-env)"
 	sh -c 'eval $$(minikube docker-env) && docker build -f Dockerfile.amd64 -t flannel/minikube .'
 
