@@ -34,8 +34,6 @@ github.com/aws/aws-sdk-go/private/protocol/rest
 github.com/aws/aws-sdk-go/private/protocol/xml/xmlutil
 github.com/aws/aws-sdk-go/service/ec2
 github.com/aws/aws-sdk-go/service/sts
-# github.com/benmoss/go-powershell v0.0.0-20190925205200-09527df358ca
-## explicit
 # github.com/bronze1man/goStrongswanVici v0.0.0-20171013065002-4d72634a2f11
 ## explicit
 github.com/bronze1man/goStrongswanVici
@@ -108,6 +106,9 @@ github.com/golang/protobuf/proto
 # github.com/google/gofuzz v0.0.0-20161122191042-44d81051d367
 ## explicit
 github.com/google/gofuzz
+# github.com/gravitational/trace v1.1.11
+## explicit
+github.com/gravitational/trace
 # github.com/howeyc/gopass v0.0.0-20160826175423-3ca23474a7c7
 ## explicit
 github.com/howeyc/gopass
@@ -123,13 +124,9 @@ github.com/joho/godotenv
 # github.com/jonboulle/clockwork v0.1.0
 ## explicit
 github.com/jonboulle/clockwork
-# github.com/juju/errors v0.0.0-20170703010042-c7d06af17c68
-## explicit
 # github.com/juju/ratelimit v0.0.0-20151125201925-77ed1c8a0121
 ## explicit
 github.com/juju/ratelimit
-# github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd
-## explicit
 # github.com/mailru/easyjson v0.0.0-20160728113105-d5b7844b561a
 ## explicit
 github.com/mailru/easyjson/buffer
@@ -140,6 +137,8 @@ github.com/mailru/easyjson/jwriter
 # github.com/rakelkar/gonetsh v0.0.0-20190930180311-e5c5ffe4bdf0
 ## explicit
 github.com/rakelkar/gonetsh/netsh
+# github.com/sirupsen/logrus v1.0.6
+github.com/sirupsen/logrus
 # github.com/smartystreets/goconvey v1.6.4
 ## explicit
 # github.com/spf13/pflag v0.0.0-20151013200643-08b1a584251b
@@ -217,6 +216,7 @@ gopkg.in/inf.v0
 # gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0
 ## explicit
 # gopkg.in/yaml.v2 v2.0.0-20170712054546-1be3d31502d6
+## explicit
 gopkg.in/yaml.v2
 # k8s.io/apimachinery v0.0.0-20170513172009-9603df80256c
 ## explicit

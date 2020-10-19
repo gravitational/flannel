@@ -37,6 +37,15 @@ type MockIPTables struct {
 
 func (mock *MockIPTables) ruleIndex(table string, chain string, rulespec []string) int {
 	for i, rule := range mock.rules {
+		// Operations such as clear chain need to match the table / chain name only and return the index regardless
+		// of the contents of rulespec. When called with an empty rulespec match only the table/chain names, otherwise
+		// match on the rulespec as well.
+		if len(rulespec) == 0 {
+			if rule.table == table && rule.chain == chain {
+				return i
+			}
+			continue
+		}
 		if rule.table == table && rule.chain == chain && reflect.DeepEqual(rule.rulespec, rulespec) {
 			return i
 		}
@@ -68,13 +77,27 @@ func (mock *MockIPTables) AppendUnique(table string, chain string, rulespec ...s
 	return nil
 }
 
+func (mock *MockIPTables) ClearChain(table string, chain string) error {
+	for mock.ruleIndex(table, chain, nil) != -1 {
+		ruleIndex := mock.ruleIndex(table, chain, nil)
+		mock.rules = append(mock.rules[:ruleIndex], mock.rules[ruleIndex+1:]...)
+	}
+	return nil
+}
+
+func (mock *MockIPTables) HasRandomFully() bool {
+	return true
+}
+
 func TestDeleteRules(t *testing.T) {
 	ipt := &MockIPTables{}
-	setupIPTables(ipt, MasqRules(ip.IP4Net{}, lease()))
-	if len(ipt.rules) != 4 {
-		t.Errorf("Should be 4 masqRules, there are actually %d: %#v", len(ipt.rules), ipt.rules)
+
+	Config{Masquerade: true}.createRules(ipt)
+	if len(ipt.rules) != 8 {
+		t.Errorf("Should be 4 masqRules, 2 forward rules, 2 join rules, there are actually %d: %#v", len(ipt.rules), ipt.rules)
 	}
-	teardownIPTables(ipt, MasqRules(ip.IP4Net{}, lease()))
+
+	Config{}.cleanupRules(ipt)
 	if len(ipt.rules) != 0 {
 		t.Errorf("Should be 0 masqRules, there are actually %d: %#v", len(ipt.rules), ipt.rules)
 	}
@@ -83,12 +106,15 @@ func TestDeleteRules(t *testing.T) {
 func TestEnsureRules(t *testing.T) {
 	// If any masqRules are missing, they should be all deleted and recreated in the correct order
 	ipt_correct := &MockIPTables{}
-	setupIPTables(ipt_correct, MasqRules(ip.IP4Net{}, lease()))
+
+	Config{}.createRules(ipt_correct)
 	// setup a mock instance where we delete some masqRules and run `ensureIPTables`
 	ipt_recreate := &MockIPTables{}
-	setupIPTables(ipt_recreate, MasqRules(ip.IP4Net{}, lease()))
+
+	Config{}.createRules(ipt_recreate)
 	ipt_recreate.rules = ipt_recreate.rules[0:2]
-	ensureIPTables(ipt_recreate, MasqRules(ip.IP4Net{}, lease()))
+
+	Config{}.ensureRules(ipt_recreate)
 	if !reflect.DeepEqual(ipt_recreate.rules, ipt_correct.rules) {
 		t.Errorf("iptables masqRules after ensureIPTables are incorrected. Expected: %#v, Actual: %#v", ipt_recreate.rules, ipt_correct.rules)
 	}
