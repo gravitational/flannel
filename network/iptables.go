@@ -71,6 +71,8 @@ type Config struct {
 	Lease   string
 	// Setup ipMasq if configured
 	Masquerade bool
+	// IPTablesresyncInterval indicated how frequently to resync iptables
+	IPTablesresyncInterval time.Duration
 }
 
 const (
@@ -285,6 +287,8 @@ func (c Config) ensureRules(ipt IPTables) {
 		if err != nil {
 			glog.Error("Error creating iptables rules: ", trace.DebugReport(err))
 		}
+
+		return
 	}
 
 	glog.Error("Error checking iptables rules: ", trace.DebugReport(err))
@@ -297,7 +301,7 @@ func (c Config) SetupAndEnsureIPTables() error {
 	}
 
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(c.IPTablesresyncInterval)
 
 		c.cleanupRules(ipt)
 

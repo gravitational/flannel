@@ -299,9 +299,10 @@ func main() {
 	}
 
 	err = network.Config{
-		Network:    config.Network.String(),
-		Lease:      bn.Lease().Subnet.String(),
-		Masquerade: opts.ipMasq,
+		Network:                config.Network.String(),
+		Lease:                  bn.Lease().Subnet.String(),
+		Masquerade:             opts.ipMasq,
+		IPTablesresyncInterval: time.Duration(opts.iptablesResyncSeconds) * time.Second,
 	}.SetupAndEnsureIPTables()
 	if err != nil {
 		log.Errorf("Error setting up iptables: %s", err)
