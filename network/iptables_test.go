@@ -103,11 +103,11 @@ func TestDeleteRules(t *testing.T) {
 func TestEnsureRules(t *testing.T) {
 	// If any masqRules are missing, they should be all deleted and recreated in the correct order
 	ipt_correct := &MockIPTables{}
-	//setupIPTables(ipt_correct, MasqRules(ip.IP4Net{}, lease()))
+
 	Config{}.createRules(ipt_correct)
 	// setup a mock instance where we delete some masqRules and run `ensureIPTables`
 	ipt_recreate := &MockIPTables{}
-	//setupIPTables(ipt_recreate, MasqRules(ip.IP4Net{}, lease()))
+
 	Config{}.createRules(ipt_recreate)
 	ipt_recreate.rules = ipt_recreate.rules[0:2]
 
