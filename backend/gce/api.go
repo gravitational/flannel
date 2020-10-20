@@ -36,7 +36,7 @@ type gceAPI struct {
 // limit auth scope to just the cloud-platform API's
 // https://developers.google.com/identity/protocols/oauth2/scopes
 func gceScopes() []string {
-	return []string{"https://www.googleapis.com/auth/cloud-platform"}
+	return []string{"https://www.googleapis.com/auth/compute"}
 }
 
 func newAPI() (*gceAPI, error) {
