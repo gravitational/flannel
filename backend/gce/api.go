@@ -17,6 +17,7 @@ package gce
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	log "github.com/golang/glog"
@@ -26,8 +27,12 @@ import (
 	"google.golang.org/api/compute/v1"
 )
 
+// Environment variable to set the network project
+const EnvGCENetworkProjectID = "GCE_NETWORK_PROJECT_ID"
+
 type gceAPI struct {
 	project        string
+	useIPNextHop   bool
 	computeService *compute.Service
 	gceNetwork     *compute.Network
 	gceInstance    *compute.Instance
@@ -64,7 +69,15 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance zone: %v", err)
 	}
 
-	gn, err := cs.Networks.Get(prj, networkName).Do()
+	// netPrj refers to the project which owns the network being used
+	// defaults to what is read by the metadata
+	netPrj := prj
+	// has the network project been provided?
+	if v := os.Getenv(EnvGCENetworkProjectID); v != "" {
+		netPrj = v
+	}
+
+	gn, err := cs.Networks.Get(netPrj, networkName).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error getting network from compute service: %v", err)
 	}
@@ -74,8 +87,14 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance from compute service: %v", err)
 	}
 
+	// if the instance project is different from the network project
+	// we need to use the ip as the next hop when creating routes
+	// cross project referencing is not allowed for instances
+	useIPNextHop := prj != netPrj
+
 	return &gceAPI{
-		project:        prj,
+		project:        netPrj,
+		useIPNextHop:   useIPNextHop,
 		computeService: cs,
 		gceNetwork:     gn,
 		gceInstance:    gi,
@@ -95,13 +114,24 @@ func (api *gceAPI) deleteRoute(subnet string) (*compute.Operation, error) {
 func (api *gceAPI) insertRoute(subnet string) (*compute.Operation, error) {
 	log.Infof("Inserting route for subnet: %v", subnet)
 	route := &compute.Route{
-		Name:            formatRouteName(subnet),
-		DestRange:       subnet,
-		Network:         api.gceNetwork.SelfLink,
-		NextHopInstance: api.gceInstance.SelfLink,
-		Priority:        1000,
-		Tags:            []string{},
+		Name:      formatRouteName(subnet),
+		DestRange: subnet,
+		Network:   api.gceNetwork.SelfLink,
+		Priority:  1000,
+		Tags:      []string{},
 	}
+
+	if api.useIPNextHop {
+		if len(api.gceInstance.NetworkInterfaces) == 0 {
+			return nil, fmt.Errorf("error expected instance=%v to have network interfaces",
+				api.gceInstance.SelfLink)
+		}
+
+		route.NextHopIp = api.gceInstance.NetworkInterfaces[0].NetworkIP
+	} else {
+		route.NextHopInstance = api.gceInstance.SelfLink
+	}
+
 	return api.computeService.Routes.Insert(api.project, route).Do()
 }
 
