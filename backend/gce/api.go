@@ -27,7 +27,8 @@ import (
 	"google.golang.org/api/compute/v1"
 )
 
-// Environment variable to set the network project
+// EnvGCENetworkProjectID is an environment variable to set the network project
+// When set, network routes will be created within a network project instead of the project running the instances
 const EnvGCENetworkProjectID = "GCE_NETWORK_PROJECT_ID"
 
 type gceAPI struct {
