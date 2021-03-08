@@ -1,3 +1,5 @@
+// Copyright 2021 Splunk Inc.
+//
 // Copyright 2015 flannel authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"time"
 
 	log "github.com/golang/glog"
@@ -31,9 +34,17 @@ import (
 // When set, network routes will be created within a network project instead of the project running the instances
 const EnvGCENetworkProjectID = "GCE_NETWORK_PROJECT_ID"
 
+// EnvKubeClusterID is an environment variable that contains the cluster name
+// This variable is used as the subnetwork secondary range name
+const EnvKubeClusterID = "KUBE_CLUSTER_ID"
+
 type gceAPI struct {
 	project        string
 	useIPNextHop   bool
+	instanceName   string
+	instanceZone   string
+	instanceRegion string
+
 	computeService *compute.Service
 	gceNetwork     *compute.Network
 	gceInstance    *compute.Instance
@@ -76,6 +87,11 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance zone: %v", err)
 	}
 
+	instanceRegion, err := instanceRegionFromMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("error getting instance region: %v", err)
+	}
+
 	// netPrj refers to the project which owns the network being used
 	// defaults to what is read by the metadata
 	netPrj := prj
@@ -94,6 +110,10 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance from compute service: %v", err)
 	}
 
+	if len(gi.NetworkInterfaces) != 1 {
+		return nil, fmt.Errorf("expected 1 network interface, got %d", len(gi.NetworkInterfaces))
+	}
+
 	// if the instance project is different from the network project
 	// we need to use the ip as the next hop when creating routes
 	// cross project referencing is not allowed for instances
@@ -101,6 +121,9 @@ func newAPI() (*gceAPI, error) {
 
 	return &gceAPI{
 		project:        netPrj,
+		instanceZone:   instanceZone,
+		instanceRegion: instanceRegion,
+		instanceName:   instanceName,
 		useIPNextHop:   useIPNextHop,
 		computeService: cs,
 		gceNetwork:     gn,
@@ -142,7 +165,113 @@ func (api *gceAPI) insertRoute(subnet string) (*compute.Operation, error) {
 	return api.computeService.Routes.Insert(api.project, route).Do()
 }
 
-func (api *gceAPI) pollOperationStatus(operationName string) error {
+// refresh the held instance with the most recent information
+func (api *gceAPI) refreshInstance() error {
+	instance, err := api.computeService.Instances.Get(api.project, api.instanceZone, api.instanceName).Do()
+	if err != nil {
+		return err
+	}
+	api.gceInstance = instance
+	return nil
+}
+
+// combine ranges by name, updating any existing entries
+func combineSecondaryRanges(ranges []*compute.SubnetworkSecondaryRange, newRange *compute.SubnetworkSecondaryRange) []*compute.SubnetworkSecondaryRange {
+	m := make(map[string]*compute.SubnetworkSecondaryRange)
+
+	for i, secondaryRange := range ranges {
+		m[secondaryRange.RangeName] = ranges[i]
+	}
+
+	m[newRange.RangeName] = newRange
+
+	combined := make([]*compute.SubnetworkSecondaryRange, 0)
+	for key := range m {
+		combined = append(combined, m[key])
+	}
+	return combined
+}
+
+func (api *gceAPI) addSubnetSecondaryRange(networkCidr string, rangeName string) (*compute.Operation, error) {
+	subnetworkName := path.Base(api.gceInstance.NetworkInterfaces[0].Subnetwork)
+	subnetwork, err := api.computeService.Subnetworks.Get(api.project, api.instanceRegion, subnetworkName).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, secondaryIPRange := range subnetwork.SecondaryIpRanges {
+		if secondaryIPRange.RangeName == rangeName && secondaryIPRange.IpCidrRange == networkCidr {
+			log.Infof("Found existing secondary IP range '%s' with cidr '%s'", secondaryIPRange.RangeName, secondaryIPRange.IpCidrRange)
+			return nil, nil
+		}
+	}
+
+	newRange := &compute.SubnetworkSecondaryRange{
+		IpCidrRange: networkCidr,
+		RangeName:   rangeName,
+	}
+
+	subnetworkUpdate := &compute.Subnetwork{
+		Fingerprint:       subnetwork.Fingerprint,
+		SecondaryIpRanges: combineSecondaryRanges(subnetwork.SecondaryIpRanges, newRange),
+	}
+
+	log.Infof("Adding secondary range '%s' with network '%s' to subnet '%s'", rangeName, networkCidr, subnetwork.Name)
+	return api.computeService.Subnetworks.Patch(api.project, api.instanceRegion, subnetwork.Name, subnetworkUpdate).Do()
+}
+
+// combine ranges by name, updating any existing entries
+func combineAliasRanges(ranges []*compute.AliasIpRange, newRange *compute.AliasIpRange) []*compute.AliasIpRange {
+	m := make(map[string]*compute.AliasIpRange)
+
+	for i, aliasRange := range ranges {
+		m[aliasRange.SubnetworkRangeName] = ranges[i]
+	}
+
+	m[newRange.SubnetworkRangeName] = newRange
+
+	combined := make([]*compute.AliasIpRange, 0)
+	for key := range m {
+		combined = append(combined, m[key])
+	}
+	return combined
+}
+
+func (api *gceAPI) addAliasIPRange(subnetCidr string, rangeName string) (*compute.Operation, error) {
+	err := api.refreshInstance()
+	if err != nil {
+		return nil, err
+	}
+
+	newRange := &compute.AliasIpRange{
+		IpCidrRange:         subnetCidr,
+		SubnetworkRangeName: rangeName,
+	}
+
+	networkInterface := &compute.NetworkInterface{
+		Fingerprint:   api.gceInstance.NetworkInterfaces[0].Fingerprint,
+		AliasIpRanges: combineAliasRanges(api.gceInstance.NetworkInterfaces[0].AliasIpRanges, newRange),
+	}
+
+	log.Infof("Adding alias cidr '%s' as part of range '%s' to instance '%s'", subnetCidr, rangeName, api.instanceName)
+	operation, err := api.computeService.Instances.UpdateNetworkInterface(api.project,
+		api.instanceZone,
+		api.instanceName,
+		api.gceInstance.NetworkInterfaces[0].Name,
+		networkInterface).Do()
+
+	if err != nil {
+		return nil, err
+	}
+	return operation, nil
+}
+
+func (api *gceAPI) pollOperationStatus(o *compute.Operation) error {
+	if o == nil || o.Status == "DONE" {
+		return nil
+	}
+
+	operationName := o.Name
 	for i := 0; i < 100; i++ {
 		operation, err := api.computeService.GlobalOperations.Get(api.project, operationName).Do()
 		if err != nil {

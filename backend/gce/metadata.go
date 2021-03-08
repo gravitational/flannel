@@ -1,3 +1,5 @@
+// Copyright 2021 Splunk Inc.
+//
 // Copyright 2015 flannel authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +18,7 @@
 package gce
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"path"
@@ -36,6 +39,24 @@ func projectFromMetadata() (string, error) {
 		return "", err
 	}
 	return path.Base(projectName), nil
+}
+
+func instanceRegionFromMetadata() (string, error) {
+	zone, err := instanceZoneFromMetadata()
+	if err != nil {
+		return "", err
+	}
+
+	// From https://cloud.google.com/compute/docs/regions-zones:
+	// >  The fully-qualified name for a zone is made up of <region>-<zone>
+	//
+	// Example zone: us-central1-a
+	// Example region: us-central1
+	zoneSlice := strings.Split(zone, "-")
+	if len(zoneSlice) == 0 {
+		return "", fmt.Errorf("Zone must have at least one '-': %s", zone)
+	}
+	return strings.Join(zoneSlice[:len(zoneSlice)-1], "-"), nil
 }
 
 func instanceZoneFromMetadata() (string, error) {
