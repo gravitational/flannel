@@ -64,8 +64,9 @@ func init() {
 }
 
 // EnvGCENetworkUseAliasIP is an environment variable that determines whether to use static routes or alias IPs
-// When "true", flannel adds alias IPs to instances
-// When any other value or unset, flannel inserts static routes
+// When "true" (or any value representing true as determined by strconv.ParseBool()), flannel adds alias IPs to instances
+// When false or blank, flannel inserts static routes
+// Other unrecognized values will return an error
 const EnvGCENetworkUseAliasIP = "FLANNEL_GCE_NETWORK_USE_ALIAS_IP"
 
 var metadataEndpoint = "http://169.254.169.254/computeMetadata/v1"
@@ -115,9 +116,13 @@ func (g *GCEBackend) RegisterNetwork(ctx context.Context, wg *sync.WaitGroup, co
 		return nil, err
 	}
 
-	useAliasIP, err := strconv.ParseBool(os.Getenv(EnvGCENetworkUseAliasIP))
-	if err != nil {
-		return nil, fmt.Errorf("error parsing environment variable '%s': %v", EnvGCENetworkUseAliasIP, err)
+	useAliasIP := false
+	useAliasIPEnv := strings.TrimSpace(os.Getenv(EnvGCENetworkUseAliasIP))
+	if useAliasIPEnv != "" {
+		useAliasIP, err = strconv.ParseBool(useAliasIPEnv)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing environment variable '%s': %v", EnvGCENetworkUseAliasIP, err)
+		}
 	}
 
 	if useAliasIP {

@@ -19,6 +19,7 @@ package gce
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -110,8 +111,8 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance from compute service: %v", err)
 	}
 
-	if len(gi.NetworkInterfaces) != 1 {
-		return nil, fmt.Errorf("expected 1 network interface, got %d", len(gi.NetworkInterfaces))
+	if len(gi.NetworkInterfaces) == 0 {
+		return nil, errors.New("expected at least 1 network interface but found zero")
 	}
 
 	// if the instance project is different from the network project
@@ -185,7 +186,7 @@ func combineSecondaryRanges(ranges []*compute.SubnetworkSecondaryRange, newRange
 
 	m[newRange.RangeName] = newRange
 
-	combined := make([]*compute.SubnetworkSecondaryRange, 0)
+	combined := make([]*compute.SubnetworkSecondaryRange, 0, len(m))
 	for key := range m {
 		combined = append(combined, m[key])
 	}
@@ -230,7 +231,7 @@ func combineAliasRanges(ranges []*compute.AliasIpRange, newRange *compute.AliasI
 
 	m[newRange.SubnetworkRangeName] = newRange
 
-	combined := make([]*compute.AliasIpRange, 0)
+	combined := make([]*compute.AliasIpRange, 0, len(m))
 	for key := range m {
 		combined = append(combined, m[key])
 	}
