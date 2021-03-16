@@ -39,6 +39,12 @@ const EnvGCENetworkProjectID = "GCE_NETWORK_PROJECT_ID"
 // This variable is used as the subnetwork secondary range name
 const EnvKubeClusterID = "KUBE_CLUSTER_ID"
 
+// Constants used for operation polling
+const (
+	zoneScope   = "zone"
+	globalScope = "global"
+)
+
 type gceAPI struct {
 	networkProject  string
 	useIPNextHop    bool
@@ -269,14 +275,24 @@ func (api *gceAPI) addAliasIPRange(subnetCidr string, rangeName string) (*comput
 	return operation, nil
 }
 
-func (api *gceAPI) pollOperationStatus(o *compute.Operation) error {
+func (api *gceAPI) pollOperationStatus(project string, scope string, o *compute.Operation) error {
 	if o == nil || o.Status == "DONE" {
 		return nil
 	}
 
 	operationName := o.Name
 	for i := 0; i < 100; i++ {
-		operation, err := api.computeService.GlobalOperations.Get(api.networkProject, operationName).Do()
+		var operation *compute.Operation
+		var err error
+		switch scope {
+		case globalScope:
+			operation, err = api.computeService.GlobalOperations.Get(project, operationName).Do()
+		case zoneScope:
+			operation, err = api.computeService.ZoneOperations.Get(project, api.instanceZone, operationName).Do()
+		default:
+			return fmt.Errorf("Unsupported operation scope: %s", scope)
+		}
+
 		if err != nil {
 			return fmt.Errorf("error fetching operation status: %v", err)
 		}

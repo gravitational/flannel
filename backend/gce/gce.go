@@ -144,7 +144,7 @@ func (g *GCEBackend) registerStaticRoutes(l *subnet.Lease) (backend.Network, err
 			return nil, fmt.Errorf("error inserting route: %v", err)
 		}
 
-		err = g.api.pollOperationStatus(operation)
+		err = g.api.pollOperationStatus(g.api.networkProject, globalScope, operation)
 		if err != nil {
 			return nil, fmt.Errorf("insert operation failed: %v", err)
 		}
@@ -174,7 +174,7 @@ func (g *GCEBackend) registerAliasIP(l *subnet.Lease, config *subnet.Config) (ba
 		return nil, fmt.Errorf("error adding secondary range to subnet: %v", err)
 	}
 
-	err = g.api.pollOperationStatus(operation)
+	err = g.api.pollOperationStatus(g.api.networkProject, globalScope, operation)
 	if err != nil {
 		return nil, fmt.Errorf("error polling subnet operation: %v", err)
 	}
@@ -185,7 +185,7 @@ func (g *GCEBackend) registerAliasIP(l *subnet.Lease, config *subnet.Config) (ba
 		return nil, fmt.Errorf("error adding alias IP: %v", err)
 	}
 
-	err = g.api.pollOperationStatus(operation)
+	err = g.api.pollOperationStatus(g.api.instanceProject, zoneScope, operation)
 	if err != nil {
 		return nil, fmt.Errorf("error polling alias IP operation: %v", err)
 	}
@@ -250,7 +250,7 @@ func (g *GCEBackend) handleMatchingRoute(subnet string) (bool, error) {
 		return false, fmt.Errorf("error deleting conflicting route : %v", err)
 	}
 
-	err = g.api.pollOperationStatus(operation)
+	err = g.api.pollOperationStatus(g.api.networkProject, globalScope, operation)
 	if err != nil {
 		return false, fmt.Errorf("delete operation failed: %v", err)
 	}
