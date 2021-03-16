@@ -40,11 +40,12 @@ const EnvGCENetworkProjectID = "GCE_NETWORK_PROJECT_ID"
 const EnvKubeClusterID = "KUBE_CLUSTER_ID"
 
 type gceAPI struct {
-	project        string
-	useIPNextHop   bool
-	instanceName   string
-	instanceZone   string
-	instanceRegion string
+	networkProject  string
+	useIPNextHop    bool
+	instanceProject string
+	instanceName    string
+	instanceZone    string
+	instanceRegion  string
 
 	computeService *compute.Service
 	gceNetwork     *compute.Network
@@ -73,7 +74,7 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting network metadata: %v", err)
 	}
 
-	prj, err := projectFromMetadata()
+	instanceProject, err := projectFromMetadata()
 	if err != nil {
 		return nil, fmt.Errorf("error getting project: %v", err)
 	}
@@ -93,20 +94,20 @@ func newAPI() (*gceAPI, error) {
 		return nil, fmt.Errorf("error getting instance region: %v", err)
 	}
 
-	// netPrj refers to the project which owns the network being used
+	// networkProject refers to the project which owns the network being used
 	// defaults to what is read by the metadata
-	netPrj := prj
+	networkProject := instanceProject
 	// has the network project been provided?
 	if v := os.Getenv(EnvGCENetworkProjectID); v != "" {
-		netPrj = v
+		networkProject = v
 	}
 
-	gn, err := cs.Networks.Get(netPrj, networkName).Do()
+	gn, err := cs.Networks.Get(networkProject, networkName).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error getting network from compute service: %v", err)
 	}
 
-	gi, err := cs.Instances.Get(prj, instanceZone, instanceName).Do()
+	gi, err := cs.Instances.Get(instanceProject, instanceZone, instanceName).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error getting instance from compute service: %v", err)
 	}
@@ -118,28 +119,29 @@ func newAPI() (*gceAPI, error) {
 	// if the instance project is different from the network project
 	// we need to use the ip as the next hop when creating routes
 	// cross project referencing is not allowed for instances
-	useIPNextHop := prj != netPrj
+	useIPNextHop := instanceProject != networkProject
 
 	return &gceAPI{
-		project:        netPrj,
-		instanceZone:   instanceZone,
-		instanceRegion: instanceRegion,
-		instanceName:   instanceName,
-		useIPNextHop:   useIPNextHop,
-		computeService: cs,
-		gceNetwork:     gn,
-		gceInstance:    gi,
+		networkProject:  networkProject,
+		instanceProject: instanceProject,
+		instanceZone:    instanceZone,
+		instanceRegion:  instanceRegion,
+		instanceName:    instanceName,
+		useIPNextHop:    useIPNextHop,
+		computeService:  cs,
+		gceNetwork:      gn,
+		gceInstance:     gi,
 	}, nil
 }
 
 func (api *gceAPI) getRoute(subnet string) (*compute.Route, error) {
 	routeName := formatRouteName(subnet)
-	return api.computeService.Routes.Get(api.project, routeName).Do()
+	return api.computeService.Routes.Get(api.networkProject, routeName).Do()
 }
 
 func (api *gceAPI) deleteRoute(subnet string) (*compute.Operation, error) {
 	routeName := formatRouteName(subnet)
-	return api.computeService.Routes.Delete(api.project, routeName).Do()
+	return api.computeService.Routes.Delete(api.networkProject, routeName).Do()
 }
 
 func (api *gceAPI) insertRoute(subnet string) (*compute.Operation, error) {
@@ -163,12 +165,12 @@ func (api *gceAPI) insertRoute(subnet string) (*compute.Operation, error) {
 		route.NextHopInstance = api.gceInstance.SelfLink
 	}
 
-	return api.computeService.Routes.Insert(api.project, route).Do()
+	return api.computeService.Routes.Insert(api.networkProject, route).Do()
 }
 
 // refresh the held instance with the most recent information
 func (api *gceAPI) refreshInstance() error {
-	instance, err := api.computeService.Instances.Get(api.project, api.instanceZone, api.instanceName).Do()
+	instance, err := api.computeService.Instances.Get(api.instanceProject, api.instanceZone, api.instanceName).Do()
 	if err != nil {
 		return err
 	}
@@ -195,7 +197,7 @@ func combineSecondaryRanges(ranges []*compute.SubnetworkSecondaryRange, newRange
 
 func (api *gceAPI) addSubnetSecondaryRange(networkCidr string, rangeName string) (*compute.Operation, error) {
 	subnetworkName := path.Base(api.gceInstance.NetworkInterfaces[0].Subnetwork)
-	subnetwork, err := api.computeService.Subnetworks.Get(api.project, api.instanceRegion, subnetworkName).Do()
+	subnetwork, err := api.computeService.Subnetworks.Get(api.networkProject, api.instanceRegion, subnetworkName).Do()
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +220,7 @@ func (api *gceAPI) addSubnetSecondaryRange(networkCidr string, rangeName string)
 	}
 
 	log.Infof("Adding secondary range '%s' with network '%s' to subnet '%s'", rangeName, networkCidr, subnetwork.Name)
-	return api.computeService.Subnetworks.Patch(api.project, api.instanceRegion, subnetwork.Name, subnetworkUpdate).Do()
+	return api.computeService.Subnetworks.Patch(api.networkProject, api.instanceRegion, subnetwork.Name, subnetworkUpdate).Do()
 }
 
 // combine ranges by name, updating any existing entries
@@ -255,7 +257,7 @@ func (api *gceAPI) addAliasIPRange(subnetCidr string, rangeName string) (*comput
 	}
 
 	log.Infof("Adding alias cidr '%s' as part of range '%s' to instance '%s'", subnetCidr, rangeName, api.instanceName)
-	operation, err := api.computeService.Instances.UpdateNetworkInterface(api.project,
+	operation, err := api.computeService.Instances.UpdateNetworkInterface(api.instanceProject,
 		api.instanceZone,
 		api.instanceName,
 		api.gceInstance.NetworkInterfaces[0].Name,
@@ -274,7 +276,7 @@ func (api *gceAPI) pollOperationStatus(o *compute.Operation) error {
 
 	operationName := o.Name
 	for i := 0; i < 100; i++ {
-		operation, err := api.computeService.GlobalOperations.Get(api.project, operationName).Do()
+		operation, err := api.computeService.GlobalOperations.Get(api.networkProject, operationName).Do()
 		if err != nil {
 			return fmt.Errorf("error fetching operation status: %v", err)
 		}
