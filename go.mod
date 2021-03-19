@@ -3,7 +3,6 @@ module github.com/coreos/flannel
 go 1.14
 
 require (
-	cloud.google.com/go v0.9.1-0.20170629112852-7c205da84d8d // indirect
 	github.com/PuerkitoBio/purell v1.0.0 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20160726150825-5bd2802263f2 // indirect
 	github.com/aws/aws-sdk-go v1.12.54
@@ -23,7 +22,7 @@ require (
 	github.com/go-openapi/spec v0.0.0-20160808142527-6aced65f8501 // indirect
 	github.com/go-openapi/swag v0.0.0-20160704191624-1d0bd113de87 // indirect
 	github.com/gogo/protobuf v0.0.0-20160824171236-909568be09de // indirect
-	github.com/golang/glog v0.0.0-20141105023935-44145f04b68c
+	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/google/gofuzz v0.0.0-20161122191042-44d81051d367 // indirect
 	github.com/gravitational/trace v1.1.11
 	github.com/howeyc/gopass v0.0.0-20160826175423-3ca23474a7c7 // indirect
@@ -42,14 +41,12 @@ require (
 	github.com/ugorji/go v0.0.0-20170107133203-ded73eae5db7 // indirect
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
 	github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
-	golang.org/x/net v0.0.0-20200707034311-ab3426394381
-	golang.org/x/oauth2 v0.0.0-20170629032740-5432cc9688e6
-	google.golang.org/api v0.0.0-20170627180304-e6586c9293b9
-	google.golang.org/appengine v0.0.0-20160823001527-4f7eeb5305a4 // indirect
+	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11
+	golang.org/x/oauth2 v0.0.0-20201208152858-08078c50e5b5
+	google.golang.org/api v0.40.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/inf.v0 v0.9.0 // indirect
 	gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0 // indirect
-	gopkg.in/yaml.v2 v2.0.0-20170712054546-1be3d31502d6 // indirect
 	k8s.io/apimachinery v0.0.0-20170513172009-9603df80256c
 	k8s.io/client-go v3.0.1-0.20170829130306-a95edf803628+incompatible
 	k8s.io/utils v0.0.0-20171219162953-0ab3217ce272 // indirect
